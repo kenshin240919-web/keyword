@@ -186,7 +186,55 @@ def score_rows(rows, weights):
             + weights["opportunity"] * r["p_opportunity"]
             + weights["growth"] * r["p_growth"], 1)
     rows.sort(key=lambda r: r["score"], reverse=True)
+    for r in rows:
+        r["reason"] = make_reason(r)
     return rows
+
+
+# 키워드에 이 말이 들어 있으면 어떤 글을 쓰면 좋을지 알려 줍니다 (앞에 있는 것이 우선).
+WRITING_HINTS = (
+    (("신청방법", "신청기간", "신청"), "신청 절차·준비물 정리글"),
+    (("자격", "조건", "대상"), "자격·조건 체크리스트 글"),
+    (("기준", "계산"), "기준·계산법 예시 글"),
+    (("금액", "얼마", "지급액"), "금액표 정리글"),
+    (("기간", "일정", "날짜", "지급일"), "일정 정리글"),
+    (("조회", "확인", "사이트", "시스템"), "조회 방법 따라하기 글"),
+)
+
+
+def _man(n):
+    return f"{n / 10000:.1f}만" if n >= 10000 else f"{n:,}"
+
+
+def make_reason(r):
+    """점수 데이터로 추천 이유를 한 줄로 만듭니다 (강점 최대 2개 + 주의점·글 방향)."""
+    strengths = []
+    growth = (r["growth"] - 1) * 100
+    if growth >= 30:
+        strengths.append(f"최근 7일 검색 {growth:+.0f}% 급상승")
+    if r["p_opportunity"] >= 99.5:
+        strengths.append("검색 대비 경쟁 글이 후보 중 가장 적음")
+    elif r["p_opportunity"] >= 80:
+        strengths.append(f"검색 대비 경쟁 글이 적은 편(후보 중 상위 {100 - r['p_opportunity']:.0f}%)")
+    if r["p_volume"] >= 80:
+        strengths.append(f"월 {_man(r['volume'])}회로 찾는 사람이 많음")
+    if 10 <= growth < 30 and len(strengths) < 2:
+        strengths.append(f"검색 상승 중({growth:+.0f}%)")
+    if r["comp"] == "낮음" and len(strengths) < 2:
+        strengths.append("광고 경쟁 낮음")
+    if not strengths:
+        strengths.append("검색수·경쟁·추세가 고르게 무난함")
+    parts = strengths[:2]
+
+    if r["blog_total"] >= 300000:
+        parts.append("경쟁 글이 많아 세부 주제로 좁히길 권장")
+    elif growth <= -10:
+        parts.append(f"다만 최근 검색 하락({growth:+.0f}%)")
+    for words, hint in WRITING_HINTS:
+        if any(w in r["keyword"] for w in words):
+            parts.append(f"추천 글: {hint}")
+            break
+    return " · ".join(parts)
 
 
 # ---------- 결과물 ----------
@@ -199,10 +247,10 @@ def write_csv(rows, path):
     # utf-8-sig: 엑셀에서 열었을 때 한글이 깨지지 않도록
     with path.open("w", encoding="utf-8-sig", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["순위", "키워드", "월간 검색수", "블로그 문서 수", "기회 지수", "7일 상승률(%)", "점수", "광고 경쟁도", "블로그 검색"])
+        w.writerow(["순위", "키워드", "월간 검색수", "블로그 문서 수", "기회 지수", "7일 상승률(%)", "점수", "광고 경쟁도", "추천 이유", "블로그 검색"])
         for i, r in enumerate(rows, 1):
             w.writerow([i, r["keyword"], r["volume"], r["blog_total"], round(r["opportunity"], 2),
-                        round((r["growth"] - 1) * 100), r["score"], r["comp"], blog_search_url(r["keyword"])])
+                        round((r["growth"] - 1) * 100), r["score"], r["comp"], r["reason"], blog_search_url(r["keyword"])])
 
 
 def write_html(rows, path, today, stats):
@@ -211,6 +259,7 @@ def write_html(rows, path, today, stats):
         f"<td>{r['volume']:,}</td><td>{r['blog_total']:,}</td><td>{r['opportunity']:.2f}</td>"
         f"<td class='{'up' if r['growth'] >= 1 else 'down'}'>{(r['growth'] - 1) * 100:+.0f}%</td>"
         f"<td><b>{r['score']}</b></td><td>{html.escape(str(r['comp']))}</td>"
+        f"<td class='why'>{html.escape(r['reason'])}</td>"
         f"<td><a href='{html.escape(blog_search_url(r['keyword']))}' target='_blank'>열기</a></td></tr>"
         for i, r in enumerate(rows, 1)
     )
@@ -221,15 +270,16 @@ def write_html(rows, path, today, stats):
 body {{ font-family: "Malgun Gothic", sans-serif; margin: 24px; color: #222; }}
 h1 {{ font-size: 22px; margin-bottom: 4px; }}
 p.meta {{ color: #666; margin-top: 0; }}
-table {{ border-collapse: collapse; width: 100%; max-width: 1000px; }}
+table {{ border-collapse: collapse; width: 100%; max-width: 1400px; }}
 th, td {{ border-bottom: 1px solid #ddd; padding: 8px 10px; text-align: right; white-space: nowrap; }}
 th {{ background: #f4f6f8; }}
 td.kw, th.kw {{ text-align: left; font-weight: 600; }}
+td.why, th.why {{ text-align: left; white-space: normal; min-width: 280px; color: #444; font-size: 14px; }}
 .up {{ color: #c0392b; }} .down {{ color: #2c6fbb; }}
 </style></head><body>
 <h1>오늘의 블로그 키워드 · {today}</h1>
 <p class="meta">후보 {stats['candidates']}개 중 점수 상위 {len(rows)}개 · 기회 지수 = 월간 검색수 ÷ 블로그 문서 수 · 상승률 = 최근 7일 ÷ 이전 28일</p>
-<table><tr><th>순위</th><th class="kw">키워드</th><th>월간 검색수</th><th>블로그 문서 수</th><th>기회 지수</th><th>7일 상승률</th><th>점수</th><th>광고 경쟁도</th><th>블로그 검색</th></tr>
+<table><tr><th>순위</th><th class="kw">키워드</th><th>월간 검색수</th><th>블로그 문서 수</th><th>기회 지수</th><th>7일 상승률</th><th>점수</th><th>광고 경쟁도</th><th class="why">추천 이유</th><th>블로그 검색</th></tr>
 {body}
 </table></body></html>
 """, encoding="utf-8")
@@ -252,6 +302,7 @@ def print_rows(rows):
     for i, r in enumerate(rows, 1):
         print(f"  {i:>2}. {r['keyword']}  검색 {r['volume']:,} · 문서 {r['blog_total']:,} · "
               f"상승 {(r['growth'] - 1) * 100:+.0f}% · 점수 {r['score']}")
+        print(f"      └ {r['reason']}")
 
 
 # ---------- 실행 ----------
