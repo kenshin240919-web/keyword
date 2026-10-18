@@ -39,6 +39,10 @@ MAX_HINTS = 5
 TOP_N = 20
 
 
+class ApiError(Exception):
+    """API 요청 실패. 메시지에 키 값은 들어가지 않습니다."""
+
+
 def setup_console():
     """윈도우 콘솔에서 한글이 깨지지 않도록 UTF-8로 맞춥니다."""
     if os.name == "nt":
@@ -55,7 +59,7 @@ def setup_console():
             pass
 
 
-def load_keys(path=ENV_PATH):
+def load_keys(path=ENV_PATH, required=REQUIRED_KEYS):
     """env 파일에서 키를 읽습니다. 값은 절대 출력하지 않습니다."""
     if not path.exists():
         sys.exit(f"[오류] 키 파일이 없습니다: {path}")
@@ -70,7 +74,7 @@ def load_keys(path=ENV_PATH):
         if name.startswith("export "):
             name = name[len("export "):].strip()
         keys[name] = value.strip().strip('"').strip("'")
-    missing = [k for k in REQUIRED_KEYS if not keys.get(k)]
+    missing = [k for k in required if not keys.get(k)]
     if missing:
         sys.exit(f"[오류] 키 파일에 다음 항목이 없습니다: {', '.join(missing)}")
     return keys
@@ -113,9 +117,9 @@ def fetch_keywords(hints, keys):
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")
-        sys.exit(f"[오류] API 요청 실패 (HTTP {e.code}): {body}")
+        raise ApiError(f"API 요청 실패 (HTTP {e.code}): {body}") from None
     except urllib.error.URLError as e:
-        sys.exit(f"[오류] 네트워크 오류: {e.reason}")
+        raise ApiError(f"네트워크 오류: {e.reason}") from None
 
 
 def to_count(value):
@@ -170,7 +174,10 @@ def main():
     keys = load_keys()
     print(f"조회 키워드: {', '.join(hints)}")
 
-    data = fetch_keywords(hints, keys)
+    try:
+        data = fetch_keywords(hints, keys)
+    except ApiError as e:
+        sys.exit(f"[오류] {e}")
 
     output = Path(args.output or f"keywords_{datetime.now():%Y%m%d_%H%M%S}.json")
     output.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")

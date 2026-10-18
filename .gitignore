@@ -1,2 +1,5 @@
 keywords_*.json
 __pycache__/
+reports/
+logs/
+history.db
