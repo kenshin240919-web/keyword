@@ -5,6 +5,7 @@
     python daily_keywords.py                 # 오늘의 추천 키워드 리포트 생성
     python daily_keywords.py --written 궁합   # 이미 글을 쓴 키워드로 기록 (이후 추천 제외)
     python daily_keywords.py --unwritten 궁합 # 잘못 기록한 키워드 취소
+    python daily_keywords.py --skip-if-done  # 오늘 리포트가 이미 있으면 건너뜀 (자동 실행용)
 
 흐름: seeds.txt → 연관 키워드(검색광고) → 1차 필터 → 블로그 문서 수(검색 API)
       → 일별 추세(데이터랩) → 점수 → reports/날짜.html, .csv + history.db 기록
@@ -394,11 +395,14 @@ def main():
     parser = argparse.ArgumentParser(description="매일 블로그 추천 키워드 리포트")
     parser.add_argument("--written", nargs="+", metavar="키워드", help="이미 글을 쓴 키워드로 기록 (이후 추천 제외)")
     parser.add_argument("--unwritten", nargs="+", metavar="키워드", help="잘못 기록한 작성 키워드 취소")
+    parser.add_argument("--skip-if-done", action="store_true", help="오늘 리포트가 이미 있으면 실행하지 않음")
     args = parser.parse_args()
     if args.written:
         mark_written(args.written)
     elif args.unwritten:
         unmark_written(args.unwritten)
+    elif args.skip_if_done and (REPORT_DIR / f"{date.today().isoformat()}.html").exists():
+        log("오늘 리포트가 이미 있어 건너뜁니다.")
     else:
         run()
 
