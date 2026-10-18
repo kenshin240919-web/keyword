@@ -1,8 +1,11 @@
-"""네이버 개발자센터 API(데이터랩 검색어트렌드, 블로그 검색) 호출 모듈.
+"""NAVER API HUB(네이버 클라우드 플랫폼)의 블로그 검색·검색어 트렌드 호출 모듈.
 
-키 파일(~/.config/naver-searchad.env)에 아래 두 줄이 필요합니다.
+2026년 7월부터 신규 신청은 개발자센터가 아닌 NAVER API HUB에서 받습니다.
+키 파일(~/.config/naver-searchad.env)에 API HUB에서 발급받은 값 두 줄이 필요합니다.
     NAVER_CLIENT_ID=...
     NAVER_CLIENT_SECRET=...
+
+문서: https://api.ncloud-docs.com/docs/naver-api-hub-overview
 """
 import json
 import urllib.error
@@ -11,8 +14,9 @@ import urllib.request
 
 from keywordstool import ApiError
 
-DATALAB_URL = "https://openapi.naver.com/v1/datalab/search"
-BLOG_URL = "https://openapi.naver.com/v1/search/blog.json"
+API_HUB = "https://naverapihub.apigw.ntruss.com"
+DATALAB_URL = f"{API_HUB}/search-trend/v1/search"
+BLOG_URL = f"{API_HUB}/search/v1/blog"
 OPENAPI_KEYS = ("NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET")
 DATALAB_MAX_GROUPS = 5
 
@@ -30,8 +34,8 @@ def _request(req):
 
 def _headers(keys):
     return {
-        "X-Naver-Client-Id": keys["NAVER_CLIENT_ID"],
-        "X-Naver-Client-Secret": keys["NAVER_CLIENT_SECRET"],
+        "X-NCP-APIGW-API-KEY-ID": keys["NAVER_CLIENT_ID"],
+        "X-NCP-APIGW-API-KEY": keys["NAVER_CLIENT_SECRET"],
     }
 
 
