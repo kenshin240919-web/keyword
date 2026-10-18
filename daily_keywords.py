@@ -4,6 +4,7 @@
 사용법:
     python daily_keywords.py                 # 오늘의 추천 키워드 리포트 생성
     python daily_keywords.py --written 궁합   # 이미 글을 쓴 키워드로 기록 (이후 추천 제외)
+    python daily_keywords.py --unwritten 궁합 # 잘못 기록한 키워드 취소
 
 흐름: seeds.txt → 연관 키워드(검색광고) → 1차 필터 → 블로그 문서 수(검색 API)
       → 일별 추세(데이터랩) → 점수 → reports/날짜.html, .csv + history.db 기록
@@ -264,6 +265,20 @@ def mark_written(words):
     print(f"작성 완료로 기록했습니다 (이후 추천에서 제외): {', '.join(words)}")
 
 
+def unmark_written(words):
+    db = open_db()
+    removed = []
+    for w in words:
+        if db.execute("DELETE FROM written WHERE keyword = ?", ("".join(w.split()),)).rowcount:
+            removed.append(w)
+    db.commit()
+    missing = [w for w in words if w not in removed]
+    if removed:
+        print(f"작성 기록을 취소했습니다: {', '.join(removed)}")
+    if missing:
+        print(f"작성 기록에 없는 키워드입니다: {', '.join(missing)}")
+
+
 def run(today=None):
     today = today or date.today()
     config = load_config()
@@ -327,9 +342,12 @@ def main():
     keywordstool.setup_console()
     parser = argparse.ArgumentParser(description="매일 블로그 추천 키워드 리포트")
     parser.add_argument("--written", nargs="+", metavar="키워드", help="이미 글을 쓴 키워드로 기록 (이후 추천 제외)")
+    parser.add_argument("--unwritten", nargs="+", metavar="키워드", help="잘못 기록한 작성 키워드 취소")
     args = parser.parse_args()
     if args.written:
         mark_written(args.written)
+    elif args.unwritten:
+        unmark_written(args.unwritten)
     else:
         run()
 
