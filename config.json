@@ -3,7 +3,7 @@
   "max_volume": 50000,
   "candidate_limit": 100,
   "top_n": 10,
-  "exclude_recent_days": 30,
+  "exclude_recent_days": 3,
   "weights": {
     "volume": 0.3,
     "opportunity": 0.5,

@@ -6,6 +6,7 @@
     python daily_keywords.py --written 궁합   # 이미 글을 쓴 키워드로 기록 (이후 추천 제외)
     python daily_keywords.py --unwritten 궁합 # 잘못 기록한 키워드 취소
     python daily_keywords.py --skip-if-done  # 오늘 리포트가 이미 있으면 건너뜀 (자동 실행용)
+    python daily_keywords.py --refresh       # 오늘 결과를 버리고 새로 뽑기 (같은 날 재실행은 첫 결과 유지)
 
 흐름: seeds.txt → 연관 키워드(검색광고) → 1차 필터 → 블로그 문서 수(검색 API)
       → 일별 추세(데이터랩) → 점수 → reports/날짜.html, .csv + history.db 기록
@@ -38,7 +39,7 @@ DEFAULT_CONFIG = {
     "max_volume": 50000,
     "candidate_limit": 100,
     "top_n": 10,
-    "exclude_recent_days": 30,
+    "exclude_recent_days": 3,
     "weights": {"volume": 0.3, "opportunity": 0.5, "growth": 0.2},
     "banned_words": [],
     "open_report": True,
@@ -463,9 +464,17 @@ def unmark_written(words):
         print(f"작성 기록에 없는 키워드입니다: {', '.join(missing)}")
 
 
-def run(today=None):
+def run(today=None, refresh=False):
     today = today or date.today()
     config = load_config()
+    result_path = REPORT_DIR / f"{today.isoformat()}.json"
+    if result_path.exists() and not refresh:
+        # 같은 날 다시 실행하면 아침 첫 결과를 그대로 보여 줍니다 (API를 다시 부르지 않음).
+        saved = json.loads(result_path.read_text(encoding="utf-8"))
+        log("오늘 첫 결과를 그대로 보여 줍니다. 새로 뽑으려면 --refresh 를 붙여 실행하세요.")
+        publish(saved["top"], today, saved["candidates"], config)
+        return
+
     seeds = load_seeds()
     keys = keywordstool.load_keys(required=keywordstool.REQUIRED_KEYS + naver_api.OPENAPI_KEYS)
     db = open_db()
@@ -499,19 +508,32 @@ def run(today=None):
     if not rows:
         sys.exit("[오류] 블로그 문서 수를 하나도 가져오지 못했습니다. NAVER_CLIENT_ID/SECRET을 확인해 주세요.")
     top = score_rows(rows, config["weights"])[:config["top_n"]]
-    musts = pick_must(top, config["must_n"])
+    pick_must(top, config["must_n"])
 
     log("4/4 리포트 저장")
     REPORT_DIR.mkdir(exist_ok=True)
-    html_path = REPORT_DIR / f"{today.isoformat()}.html"
-    csv_path = REPORT_DIR / f"{today.isoformat()}.csv"
-    write_html(top, html_path, today.isoformat(), {"candidates": len(rows)})
-    write_csv(top, csv_path)
+    result_path.write_text(json.dumps({"top": top, "candidates": len(rows)}, ensure_ascii=False, indent=1),
+                           encoding="utf-8")
+    # 같은 날 --refresh 로 다시 뽑으면 그날 기록을 새 결과로 바꿉니다.
+    db.execute("DELETE FROM recommendations WHERE day = ?", (today.isoformat(),))
     db.executemany(
         "INSERT OR REPLACE INTO recommendations VALUES (?, ?, ?, ?, ?, ?)",
         [(today.isoformat(), r["keyword"], r["score"], r["volume"], r["blog_total"], r["growth"]) for r in top],
     )
     db.commit()
+
+    publish(top, today, len(rows), config)
+    if all(keys.get(k) for k in TELEGRAM_KEYS):
+        send_telegram(top, today.isoformat(), keys)
+
+
+def publish(top, today, candidates, config):
+    """리포트(HTML·CSV)를 쓰고 화면에 보여 준 뒤 브라우저로 엽니다."""
+    musts = [r for r in top if r.get("must")]
+    html_path = REPORT_DIR / f"{today.isoformat()}.html"
+    csv_path = REPORT_DIR / f"{today.isoformat()}.csv"
+    write_html(top, html_path, today.isoformat(), {"candidates": candidates})
+    write_csv(top, csv_path)
 
     print(f"\n★ 오늘 꼭 쓸 키워드 {len(musts)}개")
     for r in musts:
@@ -519,9 +541,6 @@ def run(today=None):
     print(f"\n오늘의 추천 키워드 {len(top)}개")
     print_rows(top)
     print(f"\n리포트: {html_path}\nCSV:    {csv_path}")
-
-    if all(keys.get(k) for k in TELEGRAM_KEYS):
-        send_telegram(top, today.isoformat(), keys)
     if config["open_report"]:
         import report_server
         report_server.open_report(html_path.name)
@@ -533,6 +552,7 @@ def main():
     parser.add_argument("--written", nargs="+", metavar="키워드", help="이미 글을 쓴 키워드로 기록 (이후 추천 제외)")
     parser.add_argument("--unwritten", nargs="+", metavar="키워드", help="잘못 기록한 작성 키워드 취소")
     parser.add_argument("--skip-if-done", action="store_true", help="오늘 리포트가 이미 있으면 실행하지 않음")
+    parser.add_argument("--refresh", action="store_true", help="오늘 결과를 버리고 새로 뽑기")
     args = parser.parse_args()
     if args.written:
         mark_written(args.written)
@@ -541,7 +561,7 @@ def main():
     elif args.skip_if_done and (REPORT_DIR / f"{date.today().isoformat()}.html").exists():
         log("오늘 리포트가 이미 있어 건너뜁니다.")
     else:
-        run()
+        run(refresh=args.refresh)
 
 
 if __name__ == "__main__":
