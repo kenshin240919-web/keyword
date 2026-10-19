@@ -20,7 +20,6 @@ import sys
 import time
 import urllib.parse
 import urllib.request
-import webbrowser
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -299,13 +298,56 @@ def write_csv(rows, path):
                         round((r["growth"] - 1) * 100), r["score"], r["comp"], r["reason"], blog_search_url(r["keyword"]), r.get("must") or ""])
 
 
+def _write_button(keyword):
+    return f"<button class='w' type='button' data-kw='{html.escape(keyword, quote=True)}'>오늘 썼어요</button>"
+
+
+# 리포트의 '오늘 썼어요' 버튼: report_server.py 를 통해 history.db 에 기록합니다.
+REPORT_SCRIPT = """<script>
+const live = location.protocol.startsWith('http');
+const buttons = () => document.querySelectorAll('button.w');
+function render(list) {
+  const done = new Set(list);
+  buttons().forEach(b => {
+    const on = done.has(b.dataset.kw);
+    b.classList.toggle('on', on);
+    b.textContent = on ? '\u2714 작성 완료' : '오늘 썼어요';
+    b.closest('tr, .card').classList.toggle('done', on);
+  });
+}
+async function save(kw, done) {
+  const r = await fetch('/api/written', {method: 'POST',
+    headers: {'Content-Type': 'application/json', 'X-Report-App': '1'},
+    body: JSON.stringify({keyword: kw, done})});
+  if (!r.ok) throw new Error(r.status);
+  render((await r.json()).keywords);
+}
+document.addEventListener('click', async e => {
+  const b = e.target.closest('button.w');
+  if (!b || !live) return;
+  const on = b.classList.contains('on');
+  if (on && !confirm('"' + b.dataset.kw + '" 작성 기록을 취소할까요?')) return;
+  try { await save(b.dataset.kw, !on); }
+  catch (err) { alert('기록하지 못했습니다. open_report.bat으로 리포트를 다시 열어 주세요.'); }
+});
+if (live) {
+  fetch('/api/written').then(r => r.json()).then(d => render(d.keywords)).catch(() => {});
+} else {
+  buttons().forEach(b => b.disabled = true);
+  document.getElementById('notice').hidden = false;
+}
+</script>
+"""
+
+
 def write_html(rows, path, today, stats):
     musts = [r for r in rows if r.get("must")]
     cards = "\n".join(
         f"<div class='card'><div class='n'>{i}</div><div><div class='mk'>{html.escape(r['keyword'])}</div>"
         f"<div class='ml'>{html.escape(r['must'])}</div>"
         f"<div class='mm'>월 {r['volume']:,}회 검색 · 경쟁 글 {r['blog_total']:,}개 · 7일 {(r['growth'] - 1) * 100:+.0f}% · "
-        f"<a href='{html.escape(blog_search_url(r['keyword']))}' target='_blank'>상위 글 보기</a></div></div></div>"
+        f"<a href='{html.escape(blog_search_url(r['keyword']))}' target='_blank'>상위 글 보기</a></div></div>"
+        f"{_write_button(r['keyword'])}</div>"
         for i, r in enumerate(musts, 1)
     )
     body = "\n".join(
@@ -315,7 +357,8 @@ def write_html(rows, path, today, stats):
         f"<td class='{'up' if r['growth'] >= 1 else 'down'}'>{(r['growth'] - 1) * 100:+.0f}%</td>"
         f"<td><b>{r['score']}</b></td><td>{html.escape(str(r['comp']))}</td>"
         f"<td class='why'>{html.escape(r['reason'])}</td>"
-        f"<td><a href='{html.escape(blog_search_url(r['keyword']))}' target='_blank'>열기</a></td></tr>"
+        f"<td><a href='{html.escape(blog_search_url(r['keyword']))}' target='_blank'>열기</a></td>"
+        f"<td>{_write_button(r['keyword'])}</td></tr>"
         for i, r in enumerate(rows, 1)
     )
     path.write_text(f"""<!doctype html>
@@ -339,6 +382,13 @@ tr.must td {{ background: #fff8e1; }}
 .card .mk {{ font-size: 19px; font-weight: 700; }}
 .card .ml {{ color: #8a5a00; margin: 2px 0 4px; }}
 .card .mm {{ color: #555; font-size: 14px; }}
+.card > div:nth-child(2) {{ flex: 1; }}
+button.w {{ font: inherit; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid #2e7d32; background: #fff; color: #2e7d32; cursor: pointer; white-space: nowrap; }}
+button.w:hover {{ background: #e8f5e9; }}
+button.w.on {{ background: #2e7d32; color: #fff; }}
+button.w:disabled {{ border-color: #bbb; color: #999; background: #f5f5f5; cursor: default; }}
+.done .kw, .done .mk {{ text-decoration: line-through; color: #888; }}
+.notice {{ max-width: 1400px; background: #fff3f3; border: 1px solid #f2b8b5; color: #8c1d18; border-radius: 8px; padding: 10px 14px; margin: 12px 0; }}
 </style></head><body>
 <h1>오늘의 블로그 키워드 · {today}</h1>
 <p class="meta">후보 {stats['candidates']}개 중 점수 상위 {len(rows)}개 · 기회 지수 = 월간 검색수 ÷ 블로그 문서 수 · 상승률 = 최근 7일 ÷ 이전 28일</p>
@@ -346,10 +396,11 @@ tr.must td {{ background: #fff8e1; }}
 {cards}
 </div>
 <h2 style="font-size:18px">전체 추천 {len(rows)}개 <span style="font-weight:400;color:#888;font-size:14px">(★ = 꼭 쓸 키워드)</span></h2>
-<table><tr><th>순위</th><th class="kw">키워드</th><th>월간 검색수</th><th>블로그 문서 수</th><th>기회 지수</th><th>7일 상승률</th><th>점수</th><th>광고 경쟁도</th><th class="why">추천 이유</th><th>블로그 검색</th></tr>
+<table><tr><th>순위</th><th class="kw">키워드</th><th>월간 검색수</th><th>블로그 문서 수</th><th>기회 지수</th><th>7일 상승률</th><th>점수</th><th>광고 경쟁도</th><th class="why">추천 이유</th><th>블로그 검색</th><th>작성 기록</th></tr>
 {body}
-</table></body></html>
-""", encoding="utf-8")
+</table>
+<div id="notice" class="notice" hidden>'오늘 썼어요' 버튼을 쓰려면 key 폴더의 <b>open_report.bat</b>을 더블클릭해 리포트를 여세요.</div>
+""" + REPORT_SCRIPT + "</body></html>\n", encoding="utf-8")
 
 
 def send_telegram(rows, today, keys):
@@ -376,22 +427,35 @@ def print_rows(rows):
 
 # ---------- 실행 ----------
 
+def normalize(keyword):
+    return "".join(str(keyword).split())
+
+
+def add_written(db, keyword):
+    db.execute("INSERT OR REPLACE INTO written VALUES (?, ?)", (normalize(keyword), date.today().isoformat()))
+    db.commit()
+
+
+def remove_written(db, keyword):
+    removed = db.execute("DELETE FROM written WHERE keyword = ?", (normalize(keyword),)).rowcount > 0
+    db.commit()
+    return removed
+
+
+def written_keywords(db):
+    return [r[0] for r in db.execute("SELECT keyword FROM written ORDER BY day DESC, keyword")]
+
+
 def mark_written(words):
     db = open_db()
-    today = date.today().isoformat()
     for w in words:
-        db.execute("INSERT OR REPLACE INTO written VALUES (?, ?)", ("".join(w.split()), today))
-    db.commit()
+        add_written(db, w)
     print(f"작성 완료로 기록했습니다 (이후 추천에서 제외): {', '.join(words)}")
 
 
 def unmark_written(words):
     db = open_db()
-    removed = []
-    for w in words:
-        if db.execute("DELETE FROM written WHERE keyword = ?", ("".join(w.split()),)).rowcount:
-            removed.append(w)
-    db.commit()
+    removed = [w for w in words if remove_written(db, w)]
     missing = [w for w in words if w not in removed]
     if removed:
         print(f"작성 기록을 취소했습니다: {', '.join(removed)}")
@@ -459,7 +523,8 @@ def run(today=None):
     if all(keys.get(k) for k in TELEGRAM_KEYS):
         send_telegram(top, today.isoformat(), keys)
     if config["open_report"]:
-        webbrowser.open(html_path.as_uri())
+        import report_server
+        report_server.open_report(html_path.name)
 
 
 def main():

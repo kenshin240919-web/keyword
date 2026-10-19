@@ -19,6 +19,7 @@ TELEGRAM_CHAT_ID=...
 | --- | --- |
 | `python keywordstool.py "사주풀이,궁합"` | 키워드 검색수 조회 (최대 5개) |
 | `python daily_keywords.py` | 오늘의 추천 키워드 10개 + 꼭 쓸 3개(★) → `reports\날짜.html`, `.csv` |
+| `open_report.bat` 더블클릭 | 최신 리포트 열기 — **'오늘 썼어요' 버튼으로 작성 기록** |
 | `python daily_keywords.py --written 궁합` | 이미 쓴 키워드로 기록 (이후 추천 제외) |
 | `python daily_keywords.py --unwritten 궁합` | 잘못 기록한 키워드 취소 |
 | `setup_task.bat` 더블클릭 | 자동 실행 등록: 로그인할 때 + 매일 07:50 (하루 1번만) |
@@ -26,3 +27,4 @@ TELEGRAM_CHAT_ID=...
 - 씨앗 키워드: `seeds.txt` (한 줄에 하나)
 - 검색수 범위·가중치·추천 개수·꼭 쓸 개수(must_n)·금칙어: `config.json`
 - 자동 실행 로그: `logs\daily.log`
+- 리포트의 기록 버튼은 이 PC 안에서만 도는 작은 서버(`report_server.py`, 127.0.0.1:8765)를 통해 `history.db`에 저장됩니다. 6시간 동안 쓰지 않으면 스스로 꺼집니다.
