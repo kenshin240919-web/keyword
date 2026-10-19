@@ -266,15 +266,17 @@ MUST_RULES = (
 def pick_must(rows, n=3):
     """추천 목록에서 성격이 다른 '꼭 쓸 키워드' n개를 고릅니다.
 
-    경쟁 글이 30만 개 넘는 키워드는 되도록 빼고, 서로 비슷한 키워드는 함께 고르지 않습니다.
+    최근 검색이 줄고 있는 키워드(7일 상승률 0% 미만)는 고르지 않고,
+    경쟁 글이 30만 개 넘는 키워드는 되도록 빼며, 서로 비슷한 키워드는 함께 고르지 않습니다.
     """
     for r in rows:
         r["must"] = None
     picked = []
     for label, key, why in MUST_RULES[:n]:
-        pool = [r for r in rows if r not in picked and not any(_similar(r["keyword"], p["keyword"]) for p in picked)]
+        pool = [r for r in rows if r not in picked and r["growth"] >= 1.0
+                and not any(_similar(r["keyword"], p["keyword"]) for p in picked)]
         easy = [r for r in pool if r["blog_total"] < 300000]
-        pool = easy or pool or [r for r in rows if r not in picked]
+        pool = easy or pool
         if not pool:
             break
         best = max(pool, key=key)
@@ -508,7 +510,6 @@ def run(today=None, refresh=False):
     if not rows:
         sys.exit("[오류] 블로그 문서 수를 하나도 가져오지 못했습니다. NAVER_CLIENT_ID/SECRET을 확인해 주세요.")
     top = score_rows(rows, config["weights"])[:config["top_n"]]
-    pick_must(top, config["must_n"])
 
     log("4/4 리포트 저장")
     REPORT_DIR.mkdir(exist_ok=True)
@@ -528,8 +529,8 @@ def run(today=None, refresh=False):
 
 
 def publish(top, today, candidates, config):
-    """리포트(HTML·CSV)를 쓰고 화면에 보여 준 뒤 브라우저로 엽니다."""
-    musts = [r for r in top if r.get("must")]
+    """꼭 쓸 키워드를 고르고, 리포트(HTML·CSV)를 쓰고 화면에 보여 준 뒤 브라우저로 엽니다."""
+    musts = pick_must(top, config["must_n"])
     html_path = REPORT_DIR / f"{today.isoformat()}.html"
     csv_path = REPORT_DIR / f"{today.isoformat()}.csv"
     write_html(top, html_path, today.isoformat(), {"candidates": candidates})
