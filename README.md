@@ -18,11 +18,11 @@ TELEGRAM_CHAT_ID=...
 | 명령 | 설명 |
 | --- | --- |
 | `python keywordstool.py "사주풀이,궁합"` | 키워드 검색수 조회 (최대 5개) |
-| `python daily_keywords.py` | 오늘의 추천 키워드 10개 → `reports\날짜.html`, `.csv` |
+| `python daily_keywords.py` | 오늘의 추천 키워드 10개 + 꼭 쓸 3개(★) → `reports\날짜.html`, `.csv` |
 | `python daily_keywords.py --written 궁합` | 이미 쓴 키워드로 기록 (이후 추천 제외) |
 | `python daily_keywords.py --unwritten 궁합` | 잘못 기록한 키워드 취소 |
 | `setup_task.bat` 더블클릭 | 자동 실행 등록: 로그인할 때 + 매일 07:50 (하루 1번만) |
 
 - 씨앗 키워드: `seeds.txt` (한 줄에 하나)
-- 검색수 범위·가중치·추천 개수·금칙어: `config.json`
+- 검색수 범위·가중치·추천 개수·꼭 쓸 개수(must_n)·금칙어: `config.json`
 - 자동 실행 로그: `logs\daily.log`

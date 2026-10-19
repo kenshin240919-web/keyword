@@ -4,7 +4,12 @@
   "candidate_limit": 100,
   "top_n": 10,
   "exclude_recent_days": 30,
-  "weights": {"volume": 0.3, "opportunity": 0.5, "growth": 0.2},
+  "weights": {
+    "volume": 0.3,
+    "opportunity": 0.5,
+    "growth": 0.2
+  },
   "banned_words": [],
-  "open_report": true
+  "open_report": true,
+  "must_n": 3
 }

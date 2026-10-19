@@ -43,6 +43,7 @@ DEFAULT_CONFIG = {
     "weights": {"volume": 0.3, "opportunity": 0.5, "growth": 0.2},
     "banned_words": [],
     "open_report": True,
+    "must_n": 3,
 }
 TELEGRAM_KEYS = ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID")
 
@@ -238,6 +239,50 @@ def make_reason(r):
     return " · ".join(parts)
 
 
+def _common_len(a, b):
+    """두 키워드가 겹치는 가장 긴 글자 수 (예: 내일배움카드신청 / 국민내일배움카드 → 6)."""
+    best = 0
+    for i in range(len(a)):
+        for j in range(len(b)):
+            k = 0
+            while i + k < len(a) and j + k < len(b) and a[i + k] == b[j + k]:
+                k += 1
+            best = max(best, k)
+    return best
+
+
+def _similar(a, b):
+    return _common_len(a, b) >= 4
+
+
+# 꼭 쓸 3개를 고르는 기준: (이름, 고르는 값, 선정 이유)
+MUST_RULES = (
+    ("경쟁 최저", lambda r: r["opportunity"], "검색 대비 경쟁 글이 가장 적어 상위 노출에 유리"),
+    ("급상승", lambda r: r["growth"], "지금 검색이 가장 빠르게 늘고 있어 오늘 써야 효과가 큼"),
+    ("종합 1위", lambda r: r["score"], "검색수·경쟁·추세를 합친 점수가 가장 높음"),
+)
+
+
+def pick_must(rows, n=3):
+    """추천 목록에서 성격이 다른 '꼭 쓸 키워드' n개를 고릅니다.
+
+    경쟁 글이 30만 개 넘는 키워드는 되도록 빼고, 서로 비슷한 키워드는 함께 고르지 않습니다.
+    """
+    for r in rows:
+        r["must"] = None
+    picked = []
+    for label, key, why in MUST_RULES[:n]:
+        pool = [r for r in rows if r not in picked and not any(_similar(r["keyword"], p["keyword"]) for p in picked)]
+        easy = [r for r in pool if r["blog_total"] < 300000]
+        pool = easy or pool or [r for r in rows if r not in picked]
+        if not pool:
+            break
+        best = max(pool, key=key)
+        best["must"] = f"{label}: {why}"
+        picked.append(best)
+    return picked
+
+
 # ---------- 결과물 ----------
 
 def blog_search_url(keyword):
@@ -248,15 +293,24 @@ def write_csv(rows, path):
     # utf-8-sig: 엑셀에서 열었을 때 한글이 깨지지 않도록
     with path.open("w", encoding="utf-8-sig", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["순위", "키워드", "월간 검색수", "블로그 문서 수", "기회 지수", "7일 상승률(%)", "점수", "광고 경쟁도", "추천 이유", "블로그 검색"])
+        w.writerow(["순위", "키워드", "월간 검색수", "블로그 문서 수", "기회 지수", "7일 상승률(%)", "점수", "광고 경쟁도", "추천 이유", "블로그 검색", "꼭 쓸 키워드"])
         for i, r in enumerate(rows, 1):
             w.writerow([i, r["keyword"], r["volume"], r["blog_total"], round(r["opportunity"], 2),
-                        round((r["growth"] - 1) * 100), r["score"], r["comp"], r["reason"], blog_search_url(r["keyword"])])
+                        round((r["growth"] - 1) * 100), r["score"], r["comp"], r["reason"], blog_search_url(r["keyword"]), r.get("must") or ""])
 
 
 def write_html(rows, path, today, stats):
+    musts = [r for r in rows if r.get("must")]
+    cards = "\n".join(
+        f"<div class='card'><div class='n'>{i}</div><div><div class='mk'>{html.escape(r['keyword'])}</div>"
+        f"<div class='ml'>{html.escape(r['must'])}</div>"
+        f"<div class='mm'>월 {r['volume']:,}회 검색 · 경쟁 글 {r['blog_total']:,}개 · 7일 {(r['growth'] - 1) * 100:+.0f}% · "
+        f"<a href='{html.escape(blog_search_url(r['keyword']))}' target='_blank'>상위 글 보기</a></div></div></div>"
+        for i, r in enumerate(musts, 1)
+    )
     body = "\n".join(
-        f"<tr><td>{i}</td><td class='kw'>{html.escape(r['keyword'])}</td>"
+        f"<tr class='{'must' if r.get('must') else ''}'><td>{i}</td>"
+        f"<td class='kw'>{'★ ' if r.get('must') else ''}{html.escape(r['keyword'])}</td>"
         f"<td>{r['volume']:,}</td><td>{r['blog_total']:,}</td><td>{r['opportunity']:.2f}</td>"
         f"<td class='{'up' if r['growth'] >= 1 else 'down'}'>{(r['growth'] - 1) * 100:+.0f}%</td>"
         f"<td><b>{r['score']}</b></td><td>{html.escape(str(r['comp']))}</td>"
@@ -277,9 +331,21 @@ th {{ background: #f4f6f8; }}
 td.kw, th.kw {{ text-align: left; font-weight: 600; }}
 td.why, th.why {{ text-align: left; white-space: normal; min-width: 280px; color: #444; font-size: 14px; }}
 .up {{ color: #c0392b; }} .down {{ color: #2c6fbb; }}
+tr.must td {{ background: #fff8e1; }}
+.picks {{ max-width: 1400px; margin: 16px 0 28px; }}
+.picks h2 {{ font-size: 18px; margin: 0 0 10px; }}
+.card {{ display: flex; gap: 14px; align-items: flex-start; border: 2px solid #f0b400; background: #fffdf5; border-radius: 10px; padding: 12px 16px; margin-bottom: 10px; }}
+.card .n {{ flex: none; width: 30px; height: 30px; border-radius: 50%; background: #f0b400; color: #fff; font-weight: 700; display: flex; align-items: center; justify-content: center; }}
+.card .mk {{ font-size: 19px; font-weight: 700; }}
+.card .ml {{ color: #8a5a00; margin: 2px 0 4px; }}
+.card .mm {{ color: #555; font-size: 14px; }}
 </style></head><body>
 <h1>오늘의 블로그 키워드 · {today}</h1>
 <p class="meta">후보 {stats['candidates']}개 중 점수 상위 {len(rows)}개 · 기회 지수 = 월간 검색수 ÷ 블로그 문서 수 · 상승률 = 최근 7일 ÷ 이전 28일</p>
+<div class="picks"><h2>오늘 꼭 쓸 키워드 {len(musts)}개</h2>
+{cards}
+</div>
+<h2 style="font-size:18px">전체 추천 {len(rows)}개 <span style="font-weight:400;color:#888;font-size:14px">(★ = 꼭 쓸 키워드)</span></h2>
 <table><tr><th>순위</th><th class="kw">키워드</th><th>월간 검색수</th><th>블로그 문서 수</th><th>기회 지수</th><th>7일 상승률</th><th>점수</th><th>광고 경쟁도</th><th class="why">추천 이유</th><th>블로그 검색</th></tr>
 {body}
 </table></body></html>
@@ -287,7 +353,9 @@ td.why, th.why {{ text-align: left; white-space: normal; min-width: 280px; color
 
 
 def send_telegram(rows, today, keys):
-    text = f"오늘의 블로그 키워드 ({today})\n" + "\n".join(
+    musts = [r for r in rows if r.get("must")]
+    text = f"오늘의 블로그 키워드 ({today})\n\n[오늘 꼭 쓸 {len(musts)}개]\n" + "\n".join(
+        f"★ {r['keyword']} - {r['must']}" for r in musts) + "\n\n[전체 추천]\n" + "\n".join(
         f"{i}. {r['keyword']} · 검색 {r['volume']:,} · 점수 {r['score']}" for i, r in enumerate(rows, 1))
     url = f"https://api.telegram.org/bot{keys['TELEGRAM_BOT_TOKEN']}/sendMessage"
     data = urllib.parse.urlencode({"chat_id": keys["TELEGRAM_CHAT_ID"], "text": text}).encode("utf-8")
@@ -367,6 +435,7 @@ def run(today=None):
     if not rows:
         sys.exit("[오류] 블로그 문서 수를 하나도 가져오지 못했습니다. NAVER_CLIENT_ID/SECRET을 확인해 주세요.")
     top = score_rows(rows, config["weights"])[:config["top_n"]]
+    musts = pick_must(top, config["must_n"])
 
     log("4/4 리포트 저장")
     REPORT_DIR.mkdir(exist_ok=True)
@@ -380,6 +449,9 @@ def run(today=None):
     )
     db.commit()
 
+    print(f"\n★ 오늘 꼭 쓸 키워드 {len(musts)}개")
+    for r in musts:
+        print(f"  ★ {r['keyword']}  ({r['must']})")
     print(f"\n오늘의 추천 키워드 {len(top)}개")
     print_rows(top)
     print(f"\n리포트: {html_path}\nCSV:    {csv_path}")
