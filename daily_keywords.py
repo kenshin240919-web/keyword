@@ -8,8 +8,12 @@
     python daily_keywords.py --skip-if-done  # 오늘 리포트가 이미 있으면 건너뜀 (자동 실행용)
     python daily_keywords.py --refresh       # 오늘 결과를 버리고 새로 뽑기 (같은 날 재실행은 첫 결과 유지)
 
-흐름: seeds.txt → 연관 키워드(검색광고) → 1차 필터 → 블로그 문서 수(검색 API)
-      → 일별 추세(데이터랩) → 점수 → reports/날짜.html, .csv + history.db 기록
+흐름: seeds.txt → 연관 키워드(검색광고) → 작년 시즌 검색수 추정(데이터랩) → 1차 필터
+      → 블로그 문서 수(검색 API) → 점수 → reports/날짜.html, .csv + history.db 기록
+
+작년 시즌: 오늘이 2026-10-20이면 2025-11-20 ~ 2025-12-20 (1년 전 기준 한 달 뒤 한 달).
+검색광고 API는 최근 30일 검색수만 주므로, 데이터랩 일별 추이의 비율로 그 시기 검색수를 추정합니다.
+    작년 시즌 검색수 ≈ 최근 30일 검색수 × (작년 시즌 추이 합 ÷ 최근 30일 추이 합)
 """
 import argparse
 import csv
@@ -35,9 +39,12 @@ DB_PATH = BASE_DIR / "history.db"
 REPORT_DIR = BASE_DIR / "reports"
 
 DEFAULT_CONFIG = {
-    "min_volume": 1000,
+    "min_volume": 1000,          # 작년 시즌 검색수(추정) 범위
     "max_volume": 50000,
-    "candidate_limit": 100,
+    "min_now_volume": 100,       # 지금 월 검색수가 이보다 적으면 추정이 부정확해 제외
+    "scan_limit": 500,           # 작년 시즌 검색수를 추정해 볼 후보 수
+    "candidate_limit": 100,      # 블로그 문서 수까지 조회할 후보 수
+    "season_months_ahead": 1,    # 1년 전 기준 몇 달 뒤부터 볼지
     "top_n": 10,
     "exclude_recent_days": 3,
     "weights": {"volume": 0.3, "opportunity": 0.5, "growth": 0.2},
@@ -144,27 +151,40 @@ def fetch_blog_totals(keywords, keys):
     return totals
 
 
-def fetch_growth(keywords, keys, today):
-    """최근 7일 평균 ÷ 이전 28일 평균. 오늘은 집계가 덜 됐으므로 어제까지 봅니다."""
-    end = today - timedelta(days=1)
-    start = end - timedelta(days=34)
-    days = [(start + timedelta(days=i)).isoformat() for i in range(35)]
-    growth = {}
-    for group in chunks(keywords, naver_api.DATALAB_MAX_GROUPS):
+def add_months(d, months):
+    y, m = divmod(d.month - 1 + months, 12)
+    year, month = d.year + y, m + 1
+    last = (date(year + month // 12, month % 12 + 1, 1) - timedelta(days=1)).day
+    return date(year, month, min(d.day, last))
+
+
+def season_window(today, months_ahead):
+    """작년 시즌 기간: 오늘의 1년 전에서 months_ahead 달 뒤부터 한 달."""
+    start = add_months(today, months_ahead - 12)
+    return start, add_months(start, 1)
+
+
+def estimate_season(now_volumes, keys, today, start, end):
+    """{키워드: (작년 시즌 검색수 추정, 작년 시즌 ÷ 최근 30일 비율)}을 돌려줍니다."""
+    yesterday = today - timedelta(days=1)
+    recent = {(yesterday - timedelta(days=i)).isoformat() for i in range(30)}
+    season = {(start + timedelta(days=i)).isoformat() for i in range((end - start).days + 1)}
+    result = {}
+    for group in chunks(list(now_volumes), naver_api.DATALAB_MAX_GROUPS):
         try:
-            series = with_retry(naver_api.datalab_daily, group, start.isoformat(), end.isoformat(), keys)
+            series = with_retry(naver_api.datalab_daily, group, start.isoformat(), yesterday.isoformat(), keys)
         except ApiError as e:
-            log(f"  [건너뜀] 추세 {', '.join(group)}: {e}")
+            log(f"  [건너뜀] 추이 {', '.join(group)}: {e}")
             continue
         for kw in group:
-            values = [series.get(kw, {}).get(d, 0.0) for d in days]
-            prior, recent = sum(values[:28]) / 28, sum(values[28:]) / 7
-            if prior > 0:
-                growth[kw] = recent / prior
-            else:
-                growth[kw] = 2.0 if recent > 0 else 1.0
+            daily = series.get(kw, {})
+            now_sum = sum(v for d, v in daily.items() if d in recent)
+            past_sum = sum(v for d, v in daily.items() if d in season)
+            if now_sum > 0:
+                ratio = past_sum / now_sum
+                result[kw] = (round(now_volumes[kw] * ratio), ratio)
         time.sleep(0.3)
-    return growth
+    return result
 
 
 # ---------- 점수 ----------
@@ -213,25 +233,25 @@ def make_reason(r):
     strengths = []
     growth = (r["growth"] - 1) * 100
     if growth >= 30:
-        strengths.append(f"최근 7일 검색 {growth:+.0f}% 급상승")
+        strengths.append(f"작년 이 시기엔 지금보다 검색 {r['growth']:.1f}배 → 곧 늘어날 시즌 키워드")
     if r["p_opportunity"] >= 99.5:
         strengths.append("검색 대비 경쟁 글이 후보 중 가장 적음")
     elif r["p_opportunity"] >= 80:
         strengths.append(f"검색 대비 경쟁 글이 적은 편(후보 중 상위 {100 - r['p_opportunity']:.0f}%)")
     if r["p_volume"] >= 80:
-        strengths.append(f"월 {_man(r['volume'])}회로 찾는 사람이 많음")
+        strengths.append(f"작년 이 시기 월 {_man(r['volume'])}회로 찾는 사람이 많음")
     if 10 <= growth < 30 and len(strengths) < 2:
-        strengths.append(f"검색 상승 중({growth:+.0f}%)")
+        strengths.append(f"작년 이 시기 검색이 지금보다 많았음({growth:+.0f}%)")
     if r["comp"] == "낮음" and len(strengths) < 2:
         strengths.append("광고 경쟁 낮음")
     if not strengths:
-        strengths.append("검색수·경쟁·추세가 고르게 무난함")
+        strengths.append("검색수·경쟁·시즌성이 고르게 무난함")
     parts = strengths[:2]
 
     if r["blog_total"] >= 300000:
         parts.append("경쟁 글이 많아 세부 주제로 좁히길 권장")
     elif growth <= -10:
-        parts.append(f"다만 최근 검색 하락({growth:+.0f}%)")
+        parts.append(f"다만 작년 이 시기엔 지금보다 검색이 적었음({growth:+.0f}%)")
     for words, hint in WRITING_HINTS:
         if any(w in r["keyword"] for w in words):
             parts.append(f"추천 글: {hint}")
@@ -258,7 +278,7 @@ def _similar(a, b):
 # 꼭 쓸 3개를 고르는 기준: (이름, 고르는 값, 선정 이유)
 MUST_RULES = (
     ("경쟁 최저", lambda r: r["opportunity"], "검색 대비 경쟁 글이 가장 적어 상위 노출에 유리"),
-    ("급상승", lambda r: r["growth"], "지금 검색이 가장 빠르게 늘고 있어 오늘 써야 효과가 큼"),
+    ("시즌 급증", lambda r: r["growth"], "작년 이 시기에 검색이 가장 크게 늘었던 키워드라 미리 써 두기 좋음"),
     ("종합 1위", lambda r: r["score"], "검색수·경쟁·추세를 합친 점수가 가장 높음"),
 )
 
@@ -266,7 +286,7 @@ MUST_RULES = (
 def pick_must(rows, n=3):
     """추천 목록에서 성격이 다른 '꼭 쓸 키워드' n개를 고릅니다.
 
-    최근 검색이 줄고 있는 키워드(7일 상승률 0% 미만)는 고르지 않고,
+    작년 이 시기 검색이 지금보다 적었던 키워드(시즌 변화 0% 미만)는 고르지 않고,
     경쟁 글이 30만 개 넘는 키워드는 되도록 빼며, 서로 비슷한 키워드는 함께 고르지 않습니다.
     """
     for r in rows:
@@ -295,9 +315,10 @@ def write_csv(rows, path):
     # utf-8-sig: 엑셀에서 열었을 때 한글이 깨지지 않도록
     with path.open("w", encoding="utf-8-sig", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["순위", "키워드", "월간 검색수", "블로그 문서 수", "기회 지수", "7일 상승률(%)", "점수", "광고 경쟁도", "추천 이유", "블로그 검색", "꼭 쓸 키워드"])
+        w.writerow(["순위", "키워드", "작년 시즌 검색수(추정)", "현재 월 검색수", "블로그 문서 수", "기회 지수",
+                    "시즌 변화(%)", "점수", "광고 경쟁도", "추천 이유", "블로그 검색", "꼭 쓸 키워드"])
         for i, r in enumerate(rows, 1):
-            w.writerow([i, r["keyword"], r["volume"], r["blog_total"], round(r["opportunity"], 2),
+            w.writerow([i, r["keyword"], r["volume"], r.get("now_volume", ""), r["blog_total"], round(r["opportunity"], 2),
                         round((r["growth"] - 1) * 100), r["score"], r["comp"], r["reason"], blog_search_url(r["keyword"]), r.get("must") or ""])
 
 
@@ -344,11 +365,14 @@ if (live) {
 
 
 def write_html(rows, path, today, stats):
+    period = stats.get("period")
+    period_text = f"({period[0]} ~ {period[1]})" if period else ""
     musts = [r for r in rows if r.get("must")]
     cards = "\n".join(
         f"<div class='card'><div class='n'>{i}</div><div><div class='mk'>{html.escape(r['keyword'])}</div>"
         f"<div class='ml'>{html.escape(r['must'])}</div>"
-        f"<div class='mm'>월 {r['volume']:,}회 검색 · 경쟁 글 {r['blog_total']:,}개 · 7일 {(r['growth'] - 1) * 100:+.0f}% · "
+        f"<div class='mm'>작년 시즌 월 {r['volume']:,}회 검색(추정) · 경쟁 글 {r['blog_total']:,}개 · "
+        f"지금 대비 {(r['growth'] - 1) * 100:+.0f}% · "
         f"<a href='{html.escape(blog_search_url(r['keyword']))}' target='_blank'>상위 글 보기</a></div></div>"
         f"{_write_button(r['keyword'])}</div>"
         for i, r in enumerate(musts, 1)
@@ -356,7 +380,8 @@ def write_html(rows, path, today, stats):
     body = "\n".join(
         f"<tr class='{'must' if r.get('must') else ''}'><td>{i}</td>"
         f"<td class='kw'>{'★ ' if r.get('must') else ''}{html.escape(r['keyword'])}</td>"
-        f"<td>{r['volume']:,}</td><td>{r['blog_total']:,}</td><td>{r['opportunity']:.2f}</td>"
+        f"<td>{r['volume']:,}</td><td>{r.get('now_volume', 0):,}</td>"
+        f"<td>{r['blog_total']:,}</td><td>{r['opportunity']:.2f}</td>"
         f"<td class='{'up' if r['growth'] >= 1 else 'down'}'>{(r['growth'] - 1) * 100:+.0f}%</td>"
         f"<td><b>{r['score']}</b></td><td>{html.escape(str(r['comp']))}</td>"
         f"<td class='why'>{html.escape(r['reason'])}</td>"
@@ -394,12 +419,13 @@ button.w:disabled {{ border-color: #bbb; color: #999; background: #f5f5f5; curso
 .notice {{ max-width: 1400px; background: #fff3f3; border: 1px solid #f2b8b5; color: #8c1d18; border-radius: 8px; padding: 10px 14px; margin: 12px 0; }}
 </style></head><body>
 <h1>오늘의 블로그 키워드 · {today}</h1>
-<p class="meta">후보 {stats['candidates']}개 중 점수 상위 {len(rows)}개 · 기회 지수 = 월간 검색수 ÷ 블로그 문서 수 · 상승률 = 최근 7일 ÷ 이전 28일</p>
+<p class="meta"><b>작년 시즌 {period_text} 검색수 기준</b> · 후보 {stats['candidates']}개 중 점수 상위 {len(rows)}개<br>
+작년 시즌 검색수 = 현재 월 검색수 × 데이터랩 추이 비율(추정) · 기회 지수 = 작년 시즌 검색수 ÷ 블로그 문서 수 · 시즌 변화 = 작년 시즌 ÷ 최근 30일</p>
 <div class="picks"><h2>오늘 꼭 쓸 키워드 {len(musts)}개</h2>
 {cards}
 </div>
 <h2 style="font-size:18px">전체 추천 {len(rows)}개 <span style="font-weight:400;color:#888;font-size:14px">(★ = 꼭 쓸 키워드)</span></h2>
-<table><tr><th>순위</th><th class="kw">키워드</th><th>월간 검색수</th><th>블로그 문서 수</th><th>기회 지수</th><th>7일 상승률</th><th>점수</th><th>광고 경쟁도</th><th class="why">추천 이유</th><th>블로그 검색</th><th>작성 기록</th></tr>
+<table><tr><th>순위</th><th class="kw">키워드</th><th>작년 시즌<br>검색수(추정)</th><th>현재<br>월 검색수</th><th>블로그 문서 수</th><th>기회 지수</th><th>시즌 변화</th><th>점수</th><th>광고 경쟁도</th><th class="why">추천 이유</th><th>블로그 검색</th><th>작성 기록</th></tr>
 {body}
 </table>
 <div id="notice" class="notice" hidden>'오늘 썼어요' 버튼을 쓰려면 key 폴더의 <b>open_report.bat</b>을 더블클릭해 리포트를 여세요.</div>
@@ -410,7 +436,7 @@ def send_telegram(rows, today, keys):
     musts = [r for r in rows if r.get("must")]
     text = f"오늘의 블로그 키워드 ({today})\n\n[오늘 꼭 쓸 {len(musts)}개]\n" + "\n".join(
         f"★ {r['keyword']} - {r['must']}" for r in musts) + "\n\n[전체 추천]\n" + "\n".join(
-        f"{i}. {r['keyword']} · 검색 {r['volume']:,} · 점수 {r['score']}" for i, r in enumerate(rows, 1))
+        f"{i}. {r['keyword']} · 작년 시즌 검색 {r['volume']:,} · 점수 {r['score']}" for i, r in enumerate(rows, 1))
     url = f"https://api.telegram.org/bot{keys['TELEGRAM_BOT_TOKEN']}/sendMessage"
     data = urllib.parse.urlencode({"chat_id": keys["TELEGRAM_CHAT_ID"], "text": text}).encode("utf-8")
     try:
@@ -423,8 +449,8 @@ def send_telegram(rows, today, keys):
 
 def print_rows(rows):
     for i, r in enumerate(rows, 1):
-        print(f"  {i:>2}. {r['keyword']}  검색 {r['volume']:,} · 문서 {r['blog_total']:,} · "
-              f"상승 {(r['growth'] - 1) * 100:+.0f}% · 점수 {r['score']}")
+        print(f"  {i:>2}. {r['keyword']}  작년 시즌 {r['volume']:,} · 지금 {r.get('now_volume', 0):,} · "
+              f"문서 {r['blog_total']:,} · 시즌 {(r['growth'] - 1) * 100:+.0f}% · 점수 {r['score']}")
         print(f"      └ {r['reason']}")
 
 
@@ -474,38 +500,42 @@ def run(today=None, refresh=False):
         # 같은 날 다시 실행하면 아침 첫 결과를 그대로 보여 줍니다 (API를 다시 부르지 않음).
         saved = json.loads(result_path.read_text(encoding="utf-8"))
         log("오늘 첫 결과를 그대로 보여 줍니다. 새로 뽑으려면 --refresh 를 붙여 실행하세요.")
-        publish(saved["top"], today, saved["candidates"], config)
+        publish(saved["top"], today, saved["candidates"], config, saved.get("period"))
         return
 
     seeds = load_seeds()
     keys = keywordstool.load_keys(required=keywordstool.REQUIRED_KEYS + naver_api.OPENAPI_KEYS)
     db = open_db()
 
+    start, end = season_window(today, config["season_months_ahead"])
+    period = [start.isoformat(), end.isoformat()]
+
     log(f"1/4 연관 키워드 수집 (씨앗 {len(seeds)}개)")
     found = collect_candidates(seeds, keys)
     banned = [b for b in config["banned_words"] if b]
     skip = excluded_keywords(db, today, config["exclude_recent_days"])
-    pool = [
-        (kw, vol, comp) for kw, (vol, comp) in found.items()
-        if config["min_volume"] <= vol <= config["max_volume"]
-        and kw not in skip and not any(b in kw for b in banned)
-    ]
-    pool.sort(key=lambda x: x[1], reverse=True)
-    pool = pool[:config["candidate_limit"]]
-    log(f"  연관 키워드 {len(found)}개 → 1차 필터 통과 {len(pool)}개")
+    scan = sorted(
+        ((kw, vol) for kw, (vol, _) in found.items()
+         if vol >= config["min_now_volume"] and kw not in skip and not any(b in kw for b in banned)),
+        key=lambda x: x[1], reverse=True)[:config["scan_limit"]]
+    log(f"  연관 키워드 {len(found)}개 → 추정 대상 {len(scan)}개")
+
+    log(f"2/4 작년 시즌({period[0]} ~ {period[1]}) 검색수 추정 (데이터랩)")
+    season = estimate_season(dict(scan), keys, today, start, end)
+    pool = sorted(
+        (kw for kw, (est, _) in season.items() if config["min_volume"] <= est <= config["max_volume"]),
+        key=lambda kw: season[kw][0], reverse=True)[:config["candidate_limit"]]
+    log(f"  추정 {len(season)}개 → 작년 시즌 검색수 {config['min_volume']:,}~{config['max_volume']:,} 후보 {len(pool)}개")
     if not pool:
         sys.exit("[오류] 조건에 맞는 후보가 없습니다. config.json의 검색수 범위나 seeds.txt를 확인해 주세요.")
 
-    words = [kw for kw, _, _ in pool]
-    log(f"2/4 블로그 문서 수 조회 ({len(words)}개)")
-    totals = fetch_blog_totals(words, keys)
-    log("3/4 데이터랩 추세 조회")
-    growth = fetch_growth(words, keys, today)
+    log(f"3/4 블로그 문서 수 조회 ({len(pool)}개)")
+    totals = fetch_blog_totals(pool, keys)
 
     rows = [
-        {"keyword": kw, "volume": vol, "comp": comp, "blog_total": totals[kw],
-         "opportunity": vol / max(totals[kw], 1), "growth": growth.get(kw, 1.0)}
-        for kw, vol, comp in pool if kw in totals
+        {"keyword": kw, "volume": season[kw][0], "now_volume": found[kw][0], "comp": found[kw][1],
+         "blog_total": totals[kw], "opportunity": season[kw][0] / max(totals[kw], 1), "growth": season[kw][1]}
+        for kw in pool if kw in totals
     ]
     if not rows:
         sys.exit("[오류] 블로그 문서 수를 하나도 가져오지 못했습니다. NAVER_CLIENT_ID/SECRET을 확인해 주세요.")
@@ -513,7 +543,8 @@ def run(today=None, refresh=False):
 
     log("4/4 리포트 저장")
     REPORT_DIR.mkdir(exist_ok=True)
-    result_path.write_text(json.dumps({"top": top, "candidates": len(rows)}, ensure_ascii=False, indent=1),
+    result_path.write_text(json.dumps({"top": top, "candidates": len(rows), "period": period},
+                                      ensure_ascii=False, indent=1),
                            encoding="utf-8")
     # 같은 날 --refresh 로 다시 뽑으면 그날 기록을 새 결과로 바꿉니다.
     db.execute("DELETE FROM recommendations WHERE day = ?", (today.isoformat(),))
@@ -523,17 +554,17 @@ def run(today=None, refresh=False):
     )
     db.commit()
 
-    publish(top, today, len(rows), config)
+    publish(top, today, len(rows), config, period)
     if all(keys.get(k) for k in TELEGRAM_KEYS):
         send_telegram(top, today.isoformat(), keys)
 
 
-def publish(top, today, candidates, config):
+def publish(top, today, candidates, config, period=None):
     """꼭 쓸 키워드를 고르고, 리포트(HTML·CSV)를 쓰고 화면에 보여 준 뒤 브라우저로 엽니다."""
     musts = pick_must(top, config["must_n"])
     html_path = REPORT_DIR / f"{today.isoformat()}.html"
     csv_path = REPORT_DIR / f"{today.isoformat()}.csv"
-    write_html(top, html_path, today.isoformat(), {"candidates": candidates})
+    write_html(top, html_path, today.isoformat(), {"candidates": candidates, "period": period})
     write_csv(top, csv_path)
 
     print(f"\n★ 오늘 꼭 쓸 키워드 {len(musts)}개")

@@ -1,7 +1,10 @@
 {
   "min_volume": 1000,
   "max_volume": 50000,
+  "min_now_volume": 100,
+  "scan_limit": 500,
   "candidate_limit": 100,
+  "season_months_ahead": 1,
   "top_n": 10,
   "exclude_recent_days": 3,
   "weights": {
