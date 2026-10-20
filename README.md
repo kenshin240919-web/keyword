@@ -19,7 +19,7 @@ TELEGRAM_CHAT_ID=...
 | --- | --- |
 | `python keywordstool.py "사주풀이,궁합"` | 키워드 검색수 조회 (최대 5개) |
 | `python daily_keywords.py` | 작년 시즌(1년 전 기준 한 달 뒤 한 달) 검색수로 추천 10개 + 꼭 쓸 3개(★) → `reports\날짜.html`, `.csv` |
-| `open_report.bat` 더블클릭 | 최신 리포트 열기 — **'오늘 썼어요' 버튼으로 작성 기록** |
+| `open_report.bat` 더블클릭 | 오늘 리포트 열기 (없으면 먼저 만듦) — **'오늘 썼어요' 버튼으로 작성 기록** |
 | `python daily_keywords.py --refresh` | 오늘 결과를 버리고 새로 뽑기 (같은 날 다시 실행하면 첫 결과 유지) |
 | `python daily_keywords.py --written 궁합` | 이미 쓴 키워드로 기록 (이후 추천 제외) |
 | `python daily_keywords.py --unwritten 궁합` | 잘못 기록한 키워드 취소 |
