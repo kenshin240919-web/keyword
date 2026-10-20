@@ -17,13 +17,11 @@
 """
 import argparse
 import csv
-import email.utils
 import html
 import json
 import os
 import sqlite3
 import sys
-import re
 import time
 import urllib.parse
 import urllib.request
@@ -53,12 +51,6 @@ DEFAULT_CONFIG = {
     "banned_words": [],
     "open_report": True,
     "must_n": 3,
-    "news_days": 7,              # 최근 며칠 뉴스에서 새 키워드를 찾을지
-    "news_top_n": 5,             # 뉴스 섹션에 보여 줄 키워드 수
-    "news_min_volume": 100,      # 뉴스 키워드의 최소 현재 월 검색수
-    # 뉴스 제목에서 이 말이 들어간 표현만 키워드 후보로 봅니다 (블로그 주제에 맞게 바꾸세요).
-    "news_topic_words": ["지원금", "지원", "수당", "급여", "장려금", "바우처", "쿠폰", "보조금",
-                         "연금", "대출", "자금", "혜택", "환급", "지급", "카드", "감면", "공제"],
 }
 TELEGRAM_KEYS = ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID")
 
@@ -197,93 +189,6 @@ def add_details(top, found, seeds, keys, n=3):
         picks = sorted((kw for kw in volumes if base in kw and kw != r["keyword"] and kw != base),
                        key=lambda kw: volumes[kw], reverse=True)[:n]
         r["details"] = [(f"{base} {kw[len(base):]}" if kw.startswith(base) else kw, volumes[kw]) for kw in picks]
-
-
-# ---------- 뉴스에서 새 키워드 찾기 ----------
-
-# '이·가·도·로'처럼 명사 끝 글자와 헷갈리는 조사(고유가, 제도)는 떼지 않습니다.
-# 잘못 붙은 표현은 검색광고 API에서 검색수가 안 나와 자연히 걸러집니다.
-PARTICLES = ("에서는", "으로는", "에서", "으로", "까지", "부터", "에게", "이란",
-             "은", "는", "을", "를", "에", "의", "와", "과")
-
-
-def _strip_particle(word):
-    for p in PARTICLES:
-        if word.endswith(p) and len(word) - len(p) >= 2:
-            return word[:-len(p)]
-    return word
-
-
-def news_phrases(title, topic_words):
-    """뉴스 제목에서 주제어가 들어간 표현(1~3어절을 붙인 것)을 뽑습니다."""
-    words = [_strip_particle(w) for w in re.findall(r"[가-힣A-Za-z0-9]+", title) if not w[0].isdigit()]
-    found = set()
-    for size in (1, 2, 3):
-        for i in range(len(words) - size + 1):
-            phrase = "".join(words[i:i + size])
-            if 3 <= len(phrase) <= 12 and phrase not in topic_words and any(t in phrase for t in topic_words):
-                found.add(phrase)
-    return found
-
-
-def discover_news(seeds, keys, today, config, exclude):
-    """씨앗별 최신 뉴스 제목에서 자주 나오는 새 표현을 찾아 검색수·경쟁도를 붙입니다."""
-    since = today - timedelta(days=config["news_days"])
-    topic = config["news_topic_words"]
-    seen, mentions, sample = set(), {}, {}
-    for seed in seeds:
-        try:
-            articles = with_retry(naver_api.latest_news, seed, keys)
-        except ApiError as e:
-            log(f"  [건너뜀] 뉴스 {seed}: {e}")
-            continue
-        for title, link, pub in articles:
-            try:
-                if link in seen or email.utils.parsedate_to_datetime(pub).date() < since:
-                    continue
-            except (TypeError, ValueError):
-                continue
-            seen.add(link)
-            for phrase in news_phrases(title, topic):
-                mentions[phrase] = mentions.get(phrase, 0) + 1
-                sample.setdefault(phrase, (title, link))
-        time.sleep(0.1)
-    candidates = sorted((p for p, m in mentions.items() if m >= 2 and p not in exclude),
-                        key=lambda p: mentions[p], reverse=True)[:40]
-    log(f"  뉴스 {len(seen)}건 → 새 표현 후보 {len(candidates)}개")
-
-    volumes = {}
-    for group in chunks(candidates, keywordstool.MAX_HINTS):
-        try:
-            data = with_retry(keywordstool.fetch_keywords, group, keys)
-        except ApiError:
-            continue
-        listed = {normalize(i.get("relKeyword", "")): i for i in data.get("keywordList", [])}
-        for p in group:
-            if p in listed:
-                i = listed[p]
-                volumes[p] = (keywordstool.to_count(i.get("monthlyPcQcCnt", 0))
-                              + keywordstool.to_count(i.get("monthlyMobileQcCnt", 0)))
-        time.sleep(0.3)
-    picked = sorted((p for p, v in volumes.items() if v >= config["news_min_volume"]),
-                    key=lambda p: mentions[p], reverse=True)[:15]
-    totals = fetch_each(naver_api.blog_total, "블로그 문서 수", picked, keys)
-    rows = [{"keyword": p, "mentions": mentions[p], "now_volume": volumes[p], "blog_total": totals[p],
-             "opportunity": volumes[p] / max(totals[p], 1), "news_title": sample[p][0], "news_link": sample[p][1]}
-            for p in picked if p in totals]
-    if not rows:
-        return []
-    for key in ("mentions", "now_volume", "opportunity"):
-        for r, pct in zip(rows, percentile([r[key] for r in rows])):
-            r[f"p_{key}"] = pct
-    for r in rows:
-        r["score"] = round(0.4 * r["p_mentions"] + 0.3 * r["p_now_volume"] + 0.3 * r["p_opportunity"], 1)
-    rows.sort(key=lambda r: r["score"], reverse=True)
-    picked_rows = []
-    for r in rows:
-        if not any(_similar(r["keyword"], p["keyword"]) for p in picked_rows):
-            picked_rows.append(r)
-    return picked_rows[:config["news_top_n"]]
 
 
 def add_months(d, months):
@@ -452,12 +357,11 @@ def write_csv(rows, path):
         w = csv.writer(f)
         w.writerow(["순위", "키워드", "작년 시즌 검색수(추정)", "현재 월 검색수", "블로그 문서 수", "카페 글 수",
                     "기회 지수", "시즌 변화(%)", "점수", "광고 경쟁도", "추천 이유", "블로그 검색", "꼭 쓸 키워드",
-                    "지식iN 질문", "세부 키워드"])
+                    "세부 키워드"])
         for i, r in enumerate(rows, 1):
             w.writerow([i, r["keyword"], r["volume"], r.get("now_volume", ""), r["blog_total"], r.get("cafe_total", ""),
                         round(r["opportunity"], 2), round((r["growth"] - 1) * 100), r["score"], r["comp"],
                         r["reason"], blog_search_url(r["keyword"]), r.get("must") or "",
-                        " / ".join(q[0] for q in r.get("questions", [])),
                         " / ".join(name for name, _ in r.get("details", []))])
 
 
@@ -467,30 +371,6 @@ def _details_html(r):
         return ""
     chips = "".join(f"<span class='chip'>{html.escape(name)} <em>{_man(vol)}</em></span>" for name, vol in ds)
     return f"<div class='details'><span class='lbl'>세부 키워드</span>{chips}</div>"
-
-
-def _questions_html(r, limit=3):
-    qs = r.get("questions", [])[:limit]
-    if not qs:
-        return ""
-    items = "".join(f"<li><a href='{html.escape(link)}' target='_blank'>{html.escape(t)}</a></li>" for t, link in qs)
-    return f"<div class='qs'><span>지식iN에서 묻는 질문</span><ul>{items}</ul></div>"
-
-
-def _news_html(news, days):
-    if not news:
-        return ""
-    cards = "\n".join(
-        f"<div class='card news'><div class='n'>N</div><div><div class='mk'>{html.escape(r['keyword'])}</div>"
-        f"<div class='ml'>최근 {days}일 뉴스 {r['mentions']}건에 등장 · 지금 월 {r['now_volume']:,}회 검색 · "
-        f"경쟁 글 {r['blog_total']:,}개</div>"
-        f"<div class='mm'>뉴스: <a href='{html.escape(r['news_link'])}' target='_blank'>{html.escape(r['news_title'])}</a>"
-        f" · <a href='{html.escape(blog_search_url(r['keyword']))}' target='_blank'>상위 글 보기</a></div></div>"
-        f"{_write_button(r['keyword'])}</div>"
-        for r in news
-    )
-    return (f"<div class='picks'><h2>뉴스에서 새로 뜨는 키워드 {len(news)}개 "
-            f"<span class='sub'>새 정책·지원금은 작년 데이터가 없어 따로 보여 드립니다</span></h2>\n{cards}\n</div>")
 
 
 def _write_button(keyword):
@@ -545,7 +425,7 @@ def write_html(rows, path, today, stats):
         f"<div class='mm'>작년 시즌 월 {r['volume']:,}회 검색(추정) · 경쟁 글 {r['blog_total']:,}개 · "
         f"지금 대비 {(r['growth'] - 1) * 100:+.0f}% · "
         f"<a href='{html.escape(blog_search_url(r['keyword']))}' target='_blank'>상위 글 보기</a></div>"
-        f"{_details_html(r)}{_questions_html(r)}</div>"
+        f"{_details_html(r)}</div>"
         f"{_write_button(r['keyword'])}</div>"
         for i, r in enumerate(musts, 1)
     )
@@ -556,8 +436,7 @@ def write_html(rows, path, today, stats):
         f"<td>{r['blog_total']:,}</td><td>{r.get('cafe_total', 0):,}</td><td>{r['opportunity']:.2f}</td>"
         f"<td class='{'up' if r['growth'] >= 1 else 'down'}'>{(r['growth'] - 1) * 100:+.0f}%</td>"
         f"<td><b>{r['score']}</b></td><td>{html.escape(str(r['comp']))}</td>"
-        f"<td class='why'>{html.escape(r['reason'])}"
-        f"{'<details><summary>지식iN 질문</summary>' + _questions_html(r) + '</details>' if r.get('questions') else ''}</td>"
+        f"<td class='why'>{html.escape(r['reason'])}</td>"
         f"<td><a href='{html.escape(blog_search_url(r['keyword']))}' target='_blank'>열기</a></td>"
         f"<td>{_write_button(r['keyword'])}</td></tr>"
         for i, r in enumerate(rows, 1)
@@ -583,20 +462,12 @@ tr.must td {{ background: #fff8e1; }}
 .card .mk {{ font-size: 19px; font-weight: 700; }}
 .card .ml {{ color: #8a5a00; margin: 2px 0 4px; }}
 .card .mm {{ color: #555; font-size: 14px; }}
-.card.news {{ border-color: #2b6cb0; background: #f5f9ff; }}
-.card.news .n {{ background: #2b6cb0; }}
-.card.news .ml {{ color: #1e4e8c; }}
-.picks .sub {{ font-weight: 400; color: #888; font-size: 13px; }}
 .details {{ margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; white-space: normal; }}
 .details .lbl {{ font-size: 12px; color: #888; font-weight: 400; margin-right: 2px; }}
 .chip {{ font-size: 12.5px; font-weight: 500; background: #eef3fb; color: #1e4e8c; border-radius: 12px; padding: 2px 8px; }}
 .chip em {{ font-style: normal; color: #7a8ca5; font-size: 11.5px; }}
 td.kw {{ min-width: 230px; max-width: 300px; white-space: normal; }}
-.qs {{ margin-top: 6px; font-size: 14px; }}
-.qs span {{ color: #666; }}
-.qs ul {{ margin: 2px 0 0; padding-left: 18px; }}
-.qs a {{ color: #333; }}
-details summary {{ cursor: pointer; color: #2b6cb0; font-size: 13px; margin-top: 4px; }}
+
 .card > div:nth-child(2) {{ flex: 1; }}
 button.w {{ font: inherit; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid #2e7d32; background: #fff; color: #2e7d32; cursor: pointer; white-space: nowrap; }}
 button.w:hover {{ background: #e8f5e9; }}
@@ -611,7 +482,6 @@ button.w:disabled {{ border-color: #bbb; color: #999; background: #f5f5f5; curso
 <div class="picks"><h2>오늘 꼭 쓸 키워드 {len(musts)}개</h2>
 {cards}
 </div>
-{_news_html(stats.get("news") or [], stats.get("news_days", 7))}
 <h2 style="font-size:18px">전체 추천 {len(rows)}개 <span style="font-weight:400;color:#888;font-size:14px">(★ = 꼭 쓸 키워드)</span></h2>
 <table><tr><th>순위</th><th class="kw">키워드</th><th>작년 시즌<br>검색수(추정)</th><th>현재<br>월 검색수</th><th>블로그<br>문서 수</th><th>카페<br>글 수</th><th>기회 지수</th><th>시즌 변화</th><th>점수</th><th>광고 경쟁도</th><th class="why">추천 이유</th><th>블로그 검색</th><th>작성 기록</th></tr>
 {body}
@@ -620,14 +490,11 @@ button.w:disabled {{ border-color: #bbb; color: #999; background: #f5f5f5; curso
 """ + REPORT_SCRIPT + "</body></html>\n", encoding="utf-8")
 
 
-def send_telegram(rows, today, keys, news=()):
+def send_telegram(rows, today, keys):
     musts = [r for r in rows if r.get("must")]
     text = f"오늘의 블로그 키워드 ({today})\n\n[오늘 꼭 쓸 {len(musts)}개]\n" + "\n".join(
         f"★ {r['keyword']} - {r['must']}" for r in musts) + "\n\n[전체 추천]\n" + "\n".join(
         f"{i}. {r['keyword']} · 작년 시즌 검색 {r['volume']:,} · 점수 {r['score']}" for i, r in enumerate(rows, 1))
-    if news:
-        text += "\n\n[뉴스에서 새로 뜨는 키워드]\n" + "\n".join(
-            f"· {r['keyword']} · 뉴스 {r['mentions']}건 · 지금 월 {r['now_volume']:,}회" for r in news)
     url = f"https://api.telegram.org/bot{keys['TELEGRAM_BOT_TOKEN']}/sendMessage"
     data = urllib.parse.urlencode({"chat_id": keys["TELEGRAM_CHAT_ID"], "text": text}).encode("utf-8")
     try:
@@ -693,7 +560,7 @@ def run(today=None, refresh=False):
         # 같은 날 다시 실행하면 아침 첫 결과를 그대로 보여 줍니다 (API를 다시 부르지 않음).
         saved = json.loads(result_path.read_text(encoding="utf-8"))
         log("오늘 첫 결과를 그대로 보여 줍니다. 새로 뽑으려면 --refresh 를 붙여 실행하세요.")
-        publish(saved["top"], today, saved["candidates"], config, saved.get("period"), saved.get("news", []))
+        publish(saved["top"], today, saved["candidates"], config, saved.get("period"))
         return
 
     seeds = load_seeds()
@@ -703,7 +570,7 @@ def run(today=None, refresh=False):
     start, end = season_window(today, config["season_months_ahead"])
     period = [start.isoformat(), end.isoformat()]
 
-    log(f"1/4 연관 키워드 수집 (씨앗 {len(seeds)}개)")
+    log(f"1/5 연관 키워드 수집 (씨앗 {len(seeds)}개)")
     found = collect_candidates(seeds, keys)
     banned = [b for b in config["banned_words"] if b]
     skip = excluded_keywords(db, today, config["exclude_recent_days"])
@@ -713,7 +580,7 @@ def run(today=None, refresh=False):
         key=lambda x: x[1], reverse=True)[:config["scan_limit"]]
     log(f"  연관 키워드 {len(found)}개 → 추정 대상 {len(scan)}개")
 
-    log(f"2/4 작년 시즌({period[0]} ~ {period[1]}) 검색수 추정 (데이터랩)")
+    log(f"2/5 작년 시즌({period[0]} ~ {period[1]}) 검색수 추정 (데이터랩)")
     season = estimate_season(dict(scan), keys, today, start, end)
     pool = sorted(
         (kw for kw, (est, _) in season.items() if config["min_volume"] <= est <= config["max_volume"]),
@@ -722,7 +589,7 @@ def run(today=None, refresh=False):
     if not pool:
         sys.exit("[오류] 조건에 맞는 후보가 없습니다. config.json의 검색수 범위나 seeds.txt를 확인해 주세요.")
 
-    log(f"3/6 블로그·카페 글 수 조회 ({len(pool)}개)")
+    log(f"3/5 블로그·카페 글 수 조회 ({len(pool)}개)")
     totals = fetch_each(naver_api.blog_total, "블로그 문서 수", pool, keys)
     cafes = fetch_each(naver_api.cafe_total, "카페 글 수", pool, keys)
 
@@ -736,52 +603,38 @@ def run(today=None, refresh=False):
         sys.exit("[오류] 블로그 문서 수를 하나도 가져오지 못했습니다. NAVER_CLIENT_ID/SECRET을 확인해 주세요.")
     top = score_rows(rows, config["weights"])[:config["top_n"]]
 
-    log("4/6 세부 키워드·지식iN 질문 수집")
+    log("4/5 세부 키워드 수집")
     add_details(top, found, seeds, keys)
-    questions = fetch_each(naver_api.kin_questions, "지식iN", [r["keyword"] for r in top], keys)
-    for r in top:
-        r["questions"] = questions.get(r["keyword"], [])
 
-    log("5/6 뉴스에서 새 키워드 찾기")
-    exclude = skip | set(seeds) | {r["keyword"] for r in top} | {b for b in banned}
-    news = [r for r in discover_news(seeds, keys, today, config, exclude)
-            if not any(b in r["keyword"] for b in banned)]
-
-    log("6/6 리포트 저장")
+    log("5/5 리포트 저장")
     REPORT_DIR.mkdir(exist_ok=True)
-    result_path.write_text(json.dumps({"top": top, "candidates": len(rows), "period": period, "news": news},
+    result_path.write_text(json.dumps({"top": top, "candidates": len(rows), "period": period},
                                       ensure_ascii=False, indent=1),
                            encoding="utf-8")
     # 같은 날 --refresh 로 다시 뽑으면 그날 기록을 새 결과로 바꿉니다.
     db.execute("DELETE FROM recommendations WHERE day = ?", (today.isoformat(),))
     db.executemany(
         "INSERT OR REPLACE INTO recommendations VALUES (?, ?, ?, ?, ?, ?)",
-        [(today.isoformat(), r["keyword"], r["score"], r["volume"], r["blog_total"], r["growth"]) for r in top]
-        + [(today.isoformat(), r["keyword"], r["score"], r["now_volume"], r["blog_total"], 1.0) for r in news],
+        [(today.isoformat(), r["keyword"], r["score"], r["volume"], r["blog_total"], r["growth"]) for r in top],
     )
     db.commit()
 
-    publish(top, today, len(rows), config, period, news)
+    publish(top, today, len(rows), config, period)
     if all(keys.get(k) for k in TELEGRAM_KEYS):
-        send_telegram(top, today.isoformat(), keys, news)
+        send_telegram(top, today.isoformat(), keys)
 
 
-def publish(top, today, candidates, config, period=None, news=()):
+def publish(top, today, candidates, config, period=None):
     """꼭 쓸 키워드를 고르고, 리포트(HTML·CSV)를 쓰고 화면에 보여 준 뒤 브라우저로 엽니다."""
     musts = pick_must(top, config["must_n"])
     html_path = REPORT_DIR / f"{today.isoformat()}.html"
     csv_path = REPORT_DIR / f"{today.isoformat()}.csv"
-    write_html(top, html_path, today.isoformat(), {"candidates": candidates, "period": period, "news": news,
-                                                     "news_days": config["news_days"]})
+    write_html(top, html_path, today.isoformat(), {"candidates": candidates, "period": period})
     write_csv(top, csv_path)
 
     print(f"\n★ 오늘 꼭 쓸 키워드 {len(musts)}개")
     for r in musts:
         print(f"  ★ {r['keyword']}  ({r['must']})")
-    if news:
-        print(f"\n뉴스에서 새로 뜨는 키워드 {len(news)}개")
-        for r in news:
-            print(f"  · {r['keyword']}  뉴스 {r['mentions']}건 · 지금 월 {r['now_volume']:,}회 · 문서 {r['blog_total']:,}")
     print(f"\n오늘의 추천 키워드 {len(top)}개")
     print_rows(top)
     print(f"\n리포트: {html_path}\nCSV:    {csv_path}")

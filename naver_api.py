@@ -1,4 +1,4 @@
-"""NAVER API HUB(네이버 클라우드 플랫폼)의 검색(블로그·카페·지식iN·뉴스)·검색어 트렌드 호출 모듈.
+"""NAVER API HUB(네이버 클라우드 플랫폼)의 검색(블로그·카페)·검색어 트렌드 호출 모듈.
 
 2026년 7월부터 신규 신청은 개발자센터가 아닌 NAVER API HUB에서 받습니다.
 키 파일(~/.config/naver-searchad.env)에 API HUB에서 발급받은 값 두 줄이 필요합니다.
@@ -7,9 +7,7 @@
 
 문서: https://api.ncloud-docs.com/docs/naver-api-hub-overview
 """
-import html
 import json
-import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -18,7 +16,7 @@ from keywordstool import ApiError
 
 API_HUB = "https://naverapihub.apigw.ntruss.com"
 DATALAB_URL = f"{API_HUB}/search-trend/v1/search"
-SEARCH_URL = f"{API_HUB}/search/v1"   # + /blog, /cafearticle, /kin, /news
+SEARCH_URL = f"{API_HUB}/search/v1"   # + /blog, /cafearticle
 OPENAPI_KEYS = ("NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET")
 DATALAB_MAX_GROUPS = 5
 
@@ -42,14 +40,9 @@ def _headers(keys):
 
 
 def search(kind, query, keys, display=1, sort="sim"):
-    """kind: blog, cafearticle, kin, news. 응답(total, items)을 그대로 돌려줍니다."""
+    """kind: blog, cafearticle. 응답(total, items)을 그대로 돌려줍니다."""
     params = urllib.parse.urlencode({"query": query, "display": display, "sort": sort})
     return _request(urllib.request.Request(f"{SEARCH_URL}/{kind}?{params}", headers=_headers(keys)))
-
-
-def clean(text):
-    """검색 결과의 <b> 태그와 &quot; 같은 기호를 걷어 냅니다."""
-    return html.unescape(re.sub(r"<[^>]+>", "", text or "")).strip()
 
 
 def blog_total(query, keys):
@@ -60,18 +53,6 @@ def blog_total(query, keys):
 def cafe_total(query, keys):
     """네이버 카페 검색 결과의 전체 글 수."""
     return int(search("cafearticle", query, keys).get("total", 0))
-
-
-def kin_questions(query, keys, n=3):
-    """지식iN에서 이 키워드로 많이 묻는 질문 n개: [(제목, 링크), ...]"""
-    items = search("kin", query, keys, display=n).get("items", [])
-    return [(clean(i.get("title")), i.get("link", "")) for i in items]
-
-
-def latest_news(query, keys, n=100):
-    """최신순 뉴스 n건: [(제목, 링크, 발행 시각 문자열), ...]"""
-    items = search("news", query, keys, display=n, sort="date").get("items", [])
-    return [(clean(i.get("title")), i.get("link", ""), i.get("pubDate", "")) for i in items]
 
 
 def datalab_daily(keywords, start_date, end_date, keys):

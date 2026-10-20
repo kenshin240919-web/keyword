@@ -8,7 +8,7 @@
 NAVER_SEARCHAD_API_KEY=...       # 검색광고 API
 NAVER_SEARCHAD_SECRET_KEY=...
 NAVER_SEARCHAD_CUSTOMER_ID=...
-NAVER_CLIENT_ID=...              # NAVER API HUB (네이버 클라우드 플랫폼)
+NAVER_CLIENT_ID=...              # NAVER API HUB (네이버 클라우드 플랫폼: 블로그·카페 검색, 검색어 트렌드)
 NAVER_CLIENT_SECRET=...
 TELEGRAM_BOT_TOKEN=...           # 선택: 텔레그램 알림
 TELEGRAM_CHAT_ID=...
@@ -28,8 +28,7 @@ TELEGRAM_CHAT_ID=...
 - 씨앗 키워드: `seeds.txt` (한 줄에 하나)
 - 작년 시즌 검색수 = 현재 월 검색수 × 데이터랩 추이 비율 (추정값)
 - 기회 지수 = 작년 시즌 검색수 ÷ (블로그 + 카페 글 수)
-- 추천 키워드마다 세부 키워드 3개와 지식iN 질문 3개를 함께 보여 줍니다
-- 뉴스 섹션: 씨앗별 최근 뉴스 제목에서 자주 나오는 새 표현을 찾아 검색수를 확인합니다 (`news_topic_words`로 주제어 조정)
+- 추천 키워드마다 실제로 검색되는 세부 키워드 3개를 함께 보여 줍니다
 - 검색수 범위·가중치·추천 개수·꼭 쓸 개수(must_n)·금칙어: `config.json`
 - 자동 실행 로그: `logs\daily.log`
 - 리포트의 기록 버튼은 이 PC 안에서만 도는 작은 서버(`report_server.py`, 127.0.0.1:8765)를 통해 `history.db`에 저장됩니다. 6시간 동안 쓰지 않으면 스스로 꺼집니다.
