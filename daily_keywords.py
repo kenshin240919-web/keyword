@@ -170,25 +170,47 @@ def detail_base(keyword, seeds):
     return keyword
 
 
-def add_details(top, found, seeds, keys, n=3):
-    """추천 키워드마다 실제로 검색되는 세부 키워드 n개를 [(보여줄 이름, 현재 월 검색수), ...]로 붙입니다."""
-    volumes = {kw: vol for kw, (vol, _) in found.items()}
-    for group in chunks([r["keyword"] for r in top], keywordstool.MAX_HINTS):
+# 연관 키워드에서 세부 키워드를 못 찾으면, 기준 단어 뒤에 이 말을 붙여 검색수를 직접 물어봅니다.
+DETAIL_TRY = ("신청방법", "지급일", "금액", "대상", "조건", "자격", "신청", "조회", "한도",
+              "계산기", "기간", "사용처", "잔액조회", "서류", "소득기준")
+
+
+def _lookup_volumes(hints, keys, volumes):
+    """검색광고 API에 hints를 5개씩 넣어, 응답에 나온 키워드의 검색수를 volumes에 더합니다."""
+    for group in chunks(hints, keywordstool.MAX_HINTS):
         try:
             data = with_retry(keywordstool.fetch_keywords, group, keys)
         except ApiError as e:
             log(f"  [건너뜀] 세부 키워드 {', '.join(group)}: {e}")
             continue
         for i in data.get("keywordList", []):
-            kw = normalize(i.get("relKeyword", ""))
+            kw = normalize(i.get("relKeyword", "")).upper()
             volumes[kw] = max(volumes.get(kw, 0), keywordstool.to_count(i.get("monthlyPcQcCnt", 0))
                               + keywordstool.to_count(i.get("monthlyMobileQcCnt", 0)))
         time.sleep(0.3)
+
+
+def _pick_details(keyword, base, volumes, n):
+    kw_u, base_u = keyword.upper(), base.upper()
+    picks = sorted((kw for kw, vol in volumes.items() if vol > 0 and base_u in kw and kw not in (kw_u, base_u)),
+                   key=lambda kw: volumes[kw], reverse=True)[:n]
+    return [(f"{base} {kw[len(base_u):]}" if kw.startswith(base_u) else kw, volumes[kw]) for kw in picks]
+
+
+def add_details(top, found, seeds, keys, n=3):
+    """추천 키워드마다 실제로 검색되는 세부 키워드 n개를 [(보여줄 이름, 현재 월 검색수), ...]로 붙입니다.
+
+    1) 연관 키워드 목록에서 기준 단어(예: 에너지바우처)가 들어간 것을 검색수 순으로 고르고,
+    2) 모자라면 '기준 단어 + 신청방법/지급일/금액…' 조합을 만들어 검색수를 직접 확인합니다.
+    """
+    volumes = {kw.upper(): vol for kw, (vol, _) in found.items()}
+    _lookup_volumes([r["keyword"] for r in top], keys, volumes)
     for r in top:
         base = detail_base(r["keyword"], seeds)
-        picks = sorted((kw for kw in volumes if base in kw and kw != r["keyword"] and kw != base),
-                       key=lambda kw: volumes[kw], reverse=True)[:n]
-        r["details"] = [(f"{base} {kw[len(base):]}" if kw.startswith(base) else kw, volumes[kw]) for kw in picks]
+        r["details"] = _pick_details(r["keyword"], base, volumes, n)
+        if len(r["details"]) < n:
+            _lookup_volumes([base + suf for suf in DETAIL_TRY if base + suf != r["keyword"]], keys, volumes)
+            r["details"] = _pick_details(r["keyword"], base, volumes, n)
 
 
 def add_months(d, months):
@@ -560,6 +582,12 @@ def run(today=None, refresh=False):
         # 같은 날 다시 실행하면 아침 첫 결과를 그대로 보여 줍니다 (API를 다시 부르지 않음).
         saved = json.loads(result_path.read_text(encoding="utf-8"))
         log("오늘 첫 결과를 그대로 보여 줍니다. 새로 뽑으려면 --refresh 를 붙여 실행하세요.")
+        missing = [r for r in saved["top"] if len(r.get("details", [])) < 3]
+        if missing:
+            log(f"  세부 키워드가 모자란 {len(missing)}개만 다시 찾습니다.")
+            keys = keywordstool.load_keys(required=keywordstool.REQUIRED_KEYS)
+            add_details(missing, {}, load_seeds(), keys)
+            result_path.write_text(json.dumps(saved, ensure_ascii=False, indent=1), encoding="utf-8")
         publish(saved["top"], today, saved["candidates"], config, saved.get("period"))
         return
 
