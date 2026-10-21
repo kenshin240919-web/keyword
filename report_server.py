@@ -27,7 +27,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import daily_keywords as dk
-import thumbnail
+
+try:
+    import thumbnail      # Pillow가 없으면 썸네일만 빼고 나머지는 그대로 동작합니다.
+except ImportError:
+    thumbnail = None
 import keywordstool
 
 HOST = "127.0.0.1"
@@ -190,7 +194,9 @@ class Handler(BaseHTTPRequestHandler):
             image = find_image(keywords[0], config["image_dir"])
             plan = {"autopost": True, "image": image.name if image else "", "image_dir": str(config["image_dir"])}
         plan["thumb"] = None
-        if config["thumbnails_enabled"]:
+        if config["thumbnails_enabled"] and thumbnail is None:
+            plan["thumb_note"] = "Pillow가 설치되어 있지 않습니다. 명령 프롬프트에서 'pip install pillow'를 실행하세요."
+        elif config["thumbnails_enabled"]:
             try:
                 thumbnail.find_assets(config["thumbnail_dir"])
                 if with_copy:
