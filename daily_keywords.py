@@ -104,6 +104,7 @@ def open_db():
         day TEXT, keyword TEXT, score REAL, volume INTEGER,
         blog_total INTEGER, growth REAL, PRIMARY KEY (day, keyword))""")
     db.execute("CREATE TABLE IF NOT EXISTS written (keyword TEXT PRIMARY KEY, day TEXT)")
+    db.execute("CREATE TABLE IF NOT EXISTS sent (keyword TEXT PRIMARY KEY, day TEXT)")
     return db
 
 
@@ -395,6 +396,18 @@ def _details_html(r):
     return f"<div class='details'><span class='lbl'>세부 키워드</span>{chips}</div>"
 
 
+def post_keywords(r):
+    """Blog Automator로 보낼 키워드: 1번 블로그는 메인 키워드, 2~4번은 세부 키워드."""
+    return [r["keyword"]] + [name for name, _ in r.get("details", [])][:3]
+
+
+def _post_button(r):
+    kws = post_keywords(r)
+    data = html.escape(json.dumps(kws, ensure_ascii=False), quote=True)
+    return (f"<button class='p' type='button' data-kw='{html.escape(r['keyword'], quote=True)}' "
+            f"data-post='{data}'>블로그 {len(kws)}곳에 보내기</button>")
+
+
 def _write_button(keyword):
     return f"<button class='w' type='button' data-kw='{html.escape(keyword, quote=True)}'>오늘 썼어요</button>"
 
@@ -427,10 +440,42 @@ document.addEventListener('click', async e => {
   try { await save(b.dataset.kw, !on); }
   catch (err) { alert('기록하지 못했습니다. open_report.bat으로 리포트를 다시 열어 주세요.'); }
 });
+// '블로그 N곳에 보내기': Blog Automator(127.0.0.1:37321)에 블로그별 키워드로 글 작성·임시저장을 요청합니다.
+const ACCOUNTS = ['1번 lbkneon', '2번 guideruri', '3번 rbans56', '4번 cgm3854'];
+const postButtons = () => document.querySelectorAll('button.p');
+function renderSent(list) {
+  const sent = new Set(list);
+  postButtons().forEach(b => {
+    const on = sent.has(b.dataset.kw);
+    b.classList.toggle('sent', on);
+    if (on) b.textContent = '\u2714 보냄 (다시 보내기)';
+  });
+}
+document.addEventListener('click', async e => {
+  const b = e.target.closest('button.p');
+  if (!b || !live) return;
+  const kws = JSON.parse(b.dataset.post);
+  const plan = kws.map((k, i) => ACCOUNTS[i] + ' \u2190 ' + k).join('\\n');
+  const again = b.classList.contains('sent') ? '이미 보낸 키워드입니다. 다시 보낼까요?\\n\\n' : '';
+  if (!confirm(again + 'Blog Automator로 보내 글 작성 → 임시저장을 시작합니다.\\n\\n' + plan)) return;
+  b.disabled = true;
+  try {
+    const r = await fetch('/api/post', {method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-Report-App': '1'},
+      body: JSON.stringify({keywords: kws})});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || r.status);
+    renderSent(d.sent);
+    alert(d.jobs + '개 작업을 보냈습니다. 진행 상황은 크롬의 Blog Automator 사이드패널에서 확인하세요.');
+  } catch (err) { alert('보내지 못했습니다: ' + err.message); }
+  finally { b.disabled = false; }
+});
 if (live) {
+  fetch('/api/sent').then(r => r.json()).then(d => renderSent(d.keywords)).catch(() => {});
   fetch('/api/written').then(r => r.json()).then(d => render(d.keywords)).catch(() => {});
 } else {
   buttons().forEach(b => b.disabled = true);
+  postButtons().forEach(b => b.disabled = true);
   document.getElementById('notice').hidden = false;
 }
 </script>
@@ -448,7 +493,7 @@ def write_html(rows, path, today, stats):
         f"지금 대비 {(r['growth'] - 1) * 100:+.0f}% · "
         f"<a href='{html.escape(blog_search_url(r['keyword']))}' target='_blank'>상위 글 보기</a></div>"
         f"{_details_html(r)}</div>"
-        f"{_write_button(r['keyword'])}</div>"
+        f"<div class='btns'>{_post_button(r)}{_write_button(r['keyword'])}</div></div>"
         for i, r in enumerate(musts, 1)
     )
     body = "\n".join(
@@ -460,7 +505,7 @@ def write_html(rows, path, today, stats):
         f"<td><b>{r['score']}</b></td><td>{html.escape(str(r['comp']))}</td>"
         f"<td class='why'>{html.escape(r['reason'])}</td>"
         f"<td><a href='{html.escape(blog_search_url(r['keyword']))}' target='_blank'>열기</a></td>"
-        f"<td>{_write_button(r['keyword'])}</td></tr>"
+        f"<td><div class='btns'>{_post_button(r)}{_write_button(r['keyword'])}</div></td></tr>"
         for i, r in enumerate(rows, 1)
     )
     path.write_text(f"""<!doctype html>
@@ -493,6 +538,11 @@ td.kw {{ min-width: 230px; max-width: 300px; white-space: normal; }}
 .card > div:nth-child(2) {{ flex: 1; }}
 button.w {{ font: inherit; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid #2e7d32; background: #fff; color: #2e7d32; cursor: pointer; white-space: nowrap; }}
 button.w:hover {{ background: #e8f5e9; }}
+.btns {{ display: flex; flex-direction: column; gap: 6px; align-items: stretch; }}
+button.p {{ font: inherit; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid #2b6cb0; background: #2b6cb0; color: #fff; cursor: pointer; white-space: nowrap; }}
+button.p:hover {{ background: #1e4e8c; }}
+button.p.sent {{ background: #fff; color: #2b6cb0; }}
+button.p:disabled {{ border-color: #bbb; color: #999; background: #f5f5f5; cursor: default; }}
 button.w.on {{ background: #2e7d32; color: #fff; }}
 button.w:disabled {{ border-color: #bbb; color: #999; background: #f5f5f5; cursor: default; }}
 .done .kw, .done .mk {{ text-decoration: line-through; color: #888; }}
@@ -505,10 +555,10 @@ button.w:disabled {{ border-color: #bbb; color: #999; background: #f5f5f5; curso
 {cards}
 </div>
 <h2 style="font-size:18px">전체 추천 {len(rows)}개 <span style="font-weight:400;color:#888;font-size:14px">(★ = 꼭 쓸 키워드)</span></h2>
-<table><tr><th>순위</th><th class="kw">키워드</th><th>작년 시즌<br>검색수(추정)</th><th>현재<br>월 검색수</th><th>블로그<br>문서 수</th><th>카페<br>글 수</th><th>기회 지수</th><th>시즌 변화</th><th>점수</th><th>광고 경쟁도</th><th class="why">추천 이유</th><th>블로그 검색</th><th>작성 기록</th></tr>
+<table><tr><th>순위</th><th class="kw">키워드</th><th>작년 시즌<br>검색수(추정)</th><th>현재<br>월 검색수</th><th>블로그<br>문서 수</th><th>카페<br>글 수</th><th>기회 지수</th><th>시즌 변화</th><th>점수</th><th>광고 경쟁도</th><th class="why">추천 이유</th><th>블로그 검색</th><th>포스팅 · 작성 기록</th></tr>
 {body}
 </table>
-<div id="notice" class="notice" hidden>'오늘 썼어요' 버튼을 쓰려면 key 폴더의 <b>open_report.bat</b>을 더블클릭해 리포트를 여세요.</div>
+<div id="notice" class="notice" hidden>'오늘 썼어요'·'보내기' 버튼을 쓰려면 key 폴더의 <b>open_report.bat</b>을 더블클릭해 리포트를 여세요.</div>
 """ + REPORT_SCRIPT + "</body></html>\n", encoding="utf-8")
 
 
@@ -551,6 +601,15 @@ def remove_written(db, keyword):
     removed = db.execute("DELETE FROM written WHERE keyword = ?", (normalize(keyword),)).rowcount > 0
     db.commit()
     return removed
+
+
+def add_sent(db, keyword):
+    db.execute("INSERT OR REPLACE INTO sent VALUES (?, ?)", (normalize(keyword), date.today().isoformat()))
+    db.commit()
+
+
+def sent_keywords(db):
+    return [r[0] for r in db.execute("SELECT keyword FROM sent")]
 
 
 def written_keywords(db):
