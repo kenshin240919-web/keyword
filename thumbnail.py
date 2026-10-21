@@ -157,7 +157,7 @@ def render(keyword, phrase, button, out_dir, asset_dir=ASSET_DIR):
         _draw_line(img, keyword, TEMPLATE_TEXT["top"], title_font, spec["top"])
         _draw_line(img, phrase, TEMPLATE_TEXT["mid"], title_font, spec["mid"])
         _draw_line(img, button_text, TEMPLATE_TEXT["btn"], button_font, spec["btn"], align="left")
-        path = out_dir / f"{keyword}_{name}.png"
+        path = out_dir / f"{re.sub(r'[\\/:*?\"<>|]', '_', keyword)}_{name}.png"   # 윈도우 파일 이름에 못 쓰는 글자는 _
         img.convert("RGB").save(path)
         saved[name] = path
     return saved
@@ -174,7 +174,10 @@ JSON 한 줄만 출력하세요: {{"phrase": "...", "button": "확인하기"}}""
 
 
 def fallback_copy(keyword):
-    button = "신청하기" if re.search(r"신청|접수|지원금|바우처|장려금|수당|대출|쿠폰", keyword) else "확인하기"
+    if re.search(r"조회|계산|확인|기준|금액|지급일|사이트|방법", keyword) and not re.search(r"신청", keyword):
+        button = "확인하기"
+    else:
+        button = "신청하기" if re.search(r"신청|접수|지원금|바우처|장려금|수당|대출|쿠폰", keyword) else "확인하기"
     return ("신청 전 필독" if button == "신청하기" else "이것만 확인"), button
 
 

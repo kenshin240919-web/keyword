@@ -27,6 +27,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import daily_keywords as dk
+import thumbnail
 import keywordstool
 
 HOST = "127.0.0.1"
@@ -35,7 +36,7 @@ IDLE_LIMIT = 6 * 3600
 REPORT_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}\.(html|csv)$")
 BASE_URL = f"http://{HOST}:{PORT}"
 # 서버 코드를 바꾸면 올립니다. 예전 버전 서버가 떠 있으면 끄고 새로 켭니다.
-SERVER_VERSION = 4
+SERVER_VERSION = 5
 BLOGAUTO_URL = "http://127.0.0.1:37321"
 BLOGAUTO_JOBS_URL = f"{BLOGAUTO_URL}/api/jobs"
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".gif")
@@ -111,9 +112,13 @@ def send_to_autopost(url, keyword, image, settings):
         raise RuntimeError("자동 포스팅 프로그램(8777)에 연결하지 못했습니다.") from None
 
 
-def send_to_blogauto(keywords):
-    """블로그 1~4번에 키워드를 하나씩 넘깁니다. 만들어진 작업 수를 돌려줍니다."""
-    body = json.dumps({"keywords": {str(i): k for i, k in enumerate(keywords, 1)}}, ensure_ascii=False).encode("utf-8")
+def send_to_blogauto(keywords, thumbnails=None):
+    """블로그 1~4번에 키워드를 하나씩 넘깁니다. thumbnails = {블로그 번호: 썸네일 경로} (노란 표 바로 아래에 들어감).
+    만들어진 작업 수를 돌려줍니다."""
+    payload = {"keywords": {str(i): k for i, k in enumerate(keywords, 1)}}
+    if thumbnails:
+        payload["thumbnails"] = {str(i): str(p) for i, p in thumbnails.items()}
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     # 허브는 크롬 확장 요청만 받습니다. Origin 없이 X-Blogauto 헤더를 붙이면 확장과 같은 방식으로 받아 줍니다.
     req = urllib.request.Request(BLOGAUTO_JOBS_URL, data=body, method="POST",
                                  headers={"Content-Type": "application/json", "X-Blogauto": "1"})
@@ -176,14 +181,26 @@ class Handler(BaseHTTPRequestHandler):
             return None
         return [k.strip() for k in keywords]
 
-    def _plan(self, keywords):
-        """보내기 전에 확인할 것: 자동 포스팅을 쓰는지, 쓴다면 어떤 이미지가 잡혔는지."""
+    def _plan(self, keywords, with_copy=False):
+        """보내기 전에 확인할 것: 사이트 자동 포스팅 이미지, 썸네일을 만들 수 있는지와 그 문구."""
         config = dk.load_config()
-        if not config["autopost_enabled"]:
-            return {"autopost": False}, None
-        # 이미지가 없어도 보냅니다. 사이트 글은 이미지 없이 올라갑니다.
-        image = find_image(keywords[0], config["image_dir"])
-        return {"autopost": True, "image": image.name if image else "", "image_dir": str(config["image_dir"])}, image
+        plan, image = {"autopost": False}, None
+        if config["autopost_enabled"]:
+            # 직접 넣은 이미지가 있으면 그걸 쓰고, 없으면 만든 워프 썸네일(또는 이미지 없이)로 발행합니다.
+            image = find_image(keywords[0], config["image_dir"])
+            plan = {"autopost": True, "image": image.name if image else "", "image_dir": str(config["image_dir"])}
+        plan["thumb"] = None
+        if config["thumbnails_enabled"]:
+            try:
+                thumbnail.find_assets(config["thumbnail_dir"])
+                if with_copy:
+                    phrase, button = thumbnail.make_copy(keywords[0])
+                    plan["thumb"] = {"phrase": phrase, "button": button}
+                else:
+                    plan["thumb"] = {}
+            except FileNotFoundError as e:
+                plan["thumb_note"] = str(e)
+        return plan, image
 
     def _post(self, body, preview=False):
         keywords = self._check_keywords(body)
@@ -191,28 +208,40 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(400, {"error": "키워드는 1~4개여야 합니다."})
         config = dk.load_config()
         try:
-            plan, image = self._plan(keywords)
-            use_autopost = plan["autopost"]
+            plan, image = self._plan(keywords, with_copy=preview)
             if preview:
                 return self._json(200, plan)
+            use_autopost = plan["autopost"]
             # 둘 중 하나만 올라가는 일이 없도록, 보내기 전에 두 프로그램이 켜져 있는지 먼저 확인합니다.
             check_blogauto()
             settings = autopost_settings(config["autopost_url"]) if use_autopost else None
-            jobs = send_to_blogauto(keywords)
+            thumbs = {}
+            if plan["thumb"] is not None:
+                phrase = str(body.get("phrase") or "").strip()
+                button = "신청하기" if body.get("button") == "신청하기" else "확인하기"
+                if not phrase:
+                    phrase, button = thumbnail.fallback_copy(keywords[0])
+                thumbs = thumbnail.render(keywords[0], phrase, button, config["thumbnail_out"], config["thumbnail_dir"])
+            naver_thumbs = {i: thumbs[f"블로그 {i}번"] for i in range(1, len(keywords) + 1) if f"블로그 {i}번" in thumbs}
+            jobs = send_to_blogauto(keywords, naver_thumbs)
         except RuntimeError as e:
-            return self._json(502 if not preview else 400, {"error": str(e)})
+            return self._json(502, {"error": str(e)})
+        except (OSError, ValueError) as e:
+            return self._json(500, {"error": f"썸네일을 만들지 못했습니다: {e}"})
         db = dk.open_db()
         try:
             dk.add_sent(db, keywords[0])
         finally:
             db.close()
-        result = {"jobs": jobs, "sent": self._sent(), "autopost": 0}
+        result = {"jobs": jobs, "sent": self._sent(), "autopost": 0, "thumbs": len(thumbs)}
         if use_autopost:
+            site_image = image or thumbs.get("워프")
             try:
-                result["autopost"] = send_to_autopost(config["autopost_url"], keywords[0], image, settings)
-                result["image"] = image.name if image else ""
+                result["autopost"] = send_to_autopost(config["autopost_url"], keywords[0], site_image, settings)
+                result["image"] = site_image.name if site_image else ""
                 if image:
                     archive_image(image)
+                    result["archived"] = True
             except RuntimeError as e:
                 result["warning"] = f"네이버 블로그로는 보냈지만, 사이트 자동 포스팅은 실패했습니다: {e}"
         self._json(200, result)

@@ -55,6 +55,10 @@ DEFAULT_CONFIG = {
     "autopost_enabled": True,
     "autopost_url": "http://127.0.0.1:8777",
     "image_dir": r"D:\guidejung\images",   # 메인 키워드와 같은 이름의 이미지(또는 1장만) 넣어 두는 폴더
+    # 보낼 때 썸네일 5장(블로그 1~4번, 워프)을 만듭니다. 틀·글씨체는 thumbnail_dir, 결과는 thumbnail_out.
+    "thumbnails_enabled": True,
+    "thumbnail_dir": str(BASE_DIR / "thumbnail"),
+    "thumbnail_out": str(BASE_DIR / "thumbnails"),
 }
 TELEGRAM_KEYS = ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID")
 
@@ -459,19 +463,31 @@ document.addEventListener('click', async e => {
   const b = e.target.closest('button.p');
   if (!b || !live) return;
   const kws = JSON.parse(b.dataset.post);
+  let phrase = '', button = '';
   const call = async (url) => {
     const r = await fetch(url, {method: 'POST',
       headers: {'Content-Type': 'application/json', 'X-Report-App': '1'},
-      body: JSON.stringify({keywords: kws})});
+      body: JSON.stringify({keywords: kws, phrase, button})});
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || r.status);
     return d;
   };
   let site;
+  const label = b.textContent;
+  b.disabled = true; b.textContent = '썸네일 문구 만드는 중\u2026';
   try { site = await call('/api/post-plan'); }
   catch (err) { return alert('보내지 못했습니다: ' + err.message); }
+  finally { b.disabled = false; b.textContent = label; }
+  if (site.thumb) {
+    phrase = prompt('썸네일 가운데 문구를 확인하세요. 고쳐도 됩니다 (5~6자 권장).', site.thumb.phrase);
+    if (phrase === null) return;
+    button = site.thumb.button;
+  }
   const plan = '[네이버 블로그 \u2192 임시저장]\\n' + kws.map((k, i) => ACCOUNTS[i] + ' \u2190 ' + k).join('\\n')
-    + (site.autopost ? '\\n\\n[사이트 자동 포스팅 \u2192 발행]\\nguidejung\u00b7gov \u2190 ' + kws[0] + '\\n이미지: ' + (site.image || '없음 (이미지 없이 발행)') : '');
+    + (site.thumb ? '\\n\\n[썸네일 5장]\\n' + kws[0] + ' / ' + phrase + ' / 바로 ' + button : '')
+    + (site.autopost ? '\\n\\n[사이트 자동 포스팅 \u2192 발행]\\nguidejung\u00b7gov \u2190 ' + kws[0] + '\\n이미지: '
+       + (site.image || (site.thumb ? '워프 썸네일' : '없음 (이미지 없이 발행)')) : '')
+    + (site.thumb_note ? '\\n\\n(썸네일은 만들지 않습니다: ' + site.thumb_note + ')' : '');
   const again = b.classList.contains('sent') ? '이미 보낸 키워드입니다. 다시 보낼까요?\\n\\n' : '';
   if (!confirm(again + plan)) return;
   b.disabled = true;
@@ -479,7 +495,9 @@ document.addEventListener('click', async e => {
     const d = await call('/api/post');
     renderSent(d.sent);
     alert('네이버 블로그 ' + d.jobs + '곳에 보냈습니다 (진행 상황: 크롬 Blog Automator 사이드패널).'
-      + (d.autopost ? '\\n사이트 자동 포스팅도 시작했습니다 (진행 상황: http://127.0.0.1:8777). ' + (d.image ? ' 쓴 이미지는 사용완료 폴더로 옮겼습니다.' : '(이미지 없이 발행)') : '')
+      + (d.thumbs ? '\\n썸네일 ' + d.thumbs + '장을 만들어 함께 보냈습니다 (thumbnails 폴더).' : '')
+      + (d.autopost ? '\\n사이트 자동 포스팅도 시작했습니다 (진행 상황: http://127.0.0.1:8777). '
+        + (d.archived ? '쓴 이미지는 사용완료 폴더로 옮겼습니다.' : d.image ? '대표 이미지: ' + d.image : '(이미지 없이 발행)') : '')
       + (d.warning ? '\\n\\n' + d.warning : ''));
   } catch (err) { alert('보내지 못했습니다: ' + err.message); }
   finally { b.disabled = false; }

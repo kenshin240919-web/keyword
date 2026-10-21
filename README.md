@@ -34,3 +34,6 @@ TELEGRAM_CHAT_ID=...
 - 자동 실행 로그: `logs\daily.log`
 - 리포트의 기록 버튼은 이 PC 안에서만 도는 작은 서버(`report_server.py`, 127.0.0.1:8765)를 통해 `history.db`에 저장됩니다. 6시간 동안 쓰지 않으면 스스로 꺼집니다.
 - 이미지 폴더(`config.json`의 `image_dir`, 기본 `D:\guidejung\images`): 메인 키워드와 같은 이름의 이미지(예: `IRP세액공제.png`) 또는 이미지 1장. 이미지가 없으면 사이트 글은 이미지 없이 발행됩니다. 쓴 이미지는 `사용완료` 폴더로 옮겨집니다. 사이트 자동 포스팅을 끄려면 `autopost_enabled`를 `false`로.
+- 썸네일: 보낼 때 `thumbnail.py`가 블로그 1~4번(1080×1080)·워프(1400×800) 5장을 만들어 `thumbnails\`에 저장합니다. 블로그 썸네일은 Blog Automator가 노란 표 바로 아래에 넣고, 워프 썸네일은 사이트 대표 이미지가 됩니다(이미지 폴더에 직접 넣은 이미지가 있으면 그게 우선). 가운데 문구는 Claude Code가 만들고, 보내기 전에 고칠 수 있습니다.
+  - 준비: `thumbnail\` 폴더에 원본 틀 5장(`…_블로그 1번.png`~`_블로그 4번.png`, `…_워프.png`)과 글씨체 `Jalnan2.otf`, `BMDOHYEON_ttf.ttf` (git에 올리지 않음)
+  - 직접 만들기: `python thumbnail.py 키워드` 또는 `python thumbnail.py 키워드 "가운데 문구" 확인하기`
