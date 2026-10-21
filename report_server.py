@@ -119,7 +119,8 @@ def send_to_autopost(url, keyword, image, settings):
 def send_to_blogauto(keywords, thumbnails=None):
     """블로그 1~4번에 키워드를 하나씩 넘깁니다. thumbnails = {블로그 번호: 썸네일 경로} (노란 표 바로 아래에 들어감).
     만들어진 작업 수를 돌려줍니다."""
-    payload = {"keywords": {str(i): k for i, k in enumerate(keywords, 1)}}
+    # ctaKeyword: 네이버 글의 노란 표 문구 "▶{메인 키워드} 바로 확인하기◀"에 들어갈 키워드
+    payload = {"keywords": {str(i): k for i, k in enumerate(keywords, 1)}, "ctaKeyword": keywords[0]}
     if thumbnails:
         payload["thumbnails"] = {str(i): str(p) for i, p in thumbnails.items()}
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
