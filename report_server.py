@@ -20,6 +20,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 import urllib.error
 import urllib.request
 import webbrowser
@@ -40,7 +41,18 @@ IDLE_LIMIT = 6 * 3600
 REPORT_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}\.(html|csv)$")
 BASE_URL = f"http://{HOST}:{PORT}"
 # 서버 코드를 바꾸면 올립니다. 예전 버전 서버가 떠 있으면 끄고 새로 켭니다.
-SERVER_VERSION = 5
+SERVER_VERSION = 6
+LOG_PATH = dk.BASE_DIR / "logs" / "report_server.log"
+
+
+def log_error(where):
+    """예상하지 못한 오류를 logs/report_server.log에 남깁니다 (창 없이 돌아서 화면에 안 보이므로)."""
+    try:
+        LOG_PATH.parent.mkdir(exist_ok=True)
+        with LOG_PATH.open("a", encoding="utf-8") as f:
+            f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {where}\n{traceback.format_exc()}\n")
+    except OSError:
+        pass
 BLOGAUTO_URL = "http://127.0.0.1:37321"
 BLOGAUTO_JOBS_URL = f"{BLOGAUTO_URL}/api/jobs"
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".gif")
@@ -276,6 +288,16 @@ class Handler(BaseHTTPRequestHandler):
         self._json(404, {"error": "not found"})
 
     def do_POST(self):
+        try:
+            self._do_post()
+        except Exception as e:  # 연결만 끊기지 않도록, 원인을 기록하고 화면에 알려 줍니다.
+            log_error(f"POST {self.path}")
+            try:
+                self._json(500, {"error": f"리포트 서버 오류: {type(e).__name__}: {e} (자세한 내용: logs\\report_server.log)"})
+            except OSError:
+                pass
+
+    def _do_post(self):
         Handler.last_seen = time.time()
         # 다른 웹사이트가 몰래 기록을 바꾸지 못하도록, 리포트 페이지만 붙이는 헤더를 요구합니다.
         if self.path not in ("/api/written", "/api/post", "/api/post-plan", "/api/shutdown") or self.headers.get("X-Report-App") != "1":
@@ -304,6 +326,11 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def serve():
+    if sys.stderr is None or sys.stdout is None:   # pythonw(창 없음)로 돌 때: 출력과 오류를 로그 파일로
+        LOG_PATH.parent.mkdir(exist_ok=True)
+        stream = open(LOG_PATH, "a", encoding="utf-8", buffering=1)
+        sys.stdout = sys.stdout or stream
+        sys.stderr = sys.stderr or stream
     server = ThreadingHTTPServer((HOST, PORT), Handler)
 
     def watchdog():

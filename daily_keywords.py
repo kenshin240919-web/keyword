@@ -499,7 +499,11 @@ document.addEventListener('click', async e => {
       + (d.autopost ? '\\n사이트 자동 포스팅도 시작했습니다 (진행 상황: http://127.0.0.1:8777). '
         + (d.archived ? '쓴 이미지는 사용완료 폴더로 옮겼습니다.' : d.image ? '대표 이미지: ' + d.image : '(이미지 없이 발행)') : '')
       + (d.warning ? '\\n\\n' + d.warning : ''));
-  } catch (err) { alert('보내지 못했습니다: ' + err.message); }
+  } catch (err) {
+    alert('보내지 못했습니다: ' + (err.message === 'Failed to fetch'
+      ? '리포트 서버와 연결이 끊겼습니다. open_report.bat으로 리포트를 다시 연 뒤 눌러 주세요. 계속되면 logs 폴더의 report_server.log를 보여 주세요.'
+      : err.message));
+  }
   finally { b.disabled = false; }
 });
 if (live) {
