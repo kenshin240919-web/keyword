@@ -35,7 +35,7 @@ IDLE_LIMIT = 6 * 3600
 REPORT_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}\.(html|csv)$")
 BASE_URL = f"http://{HOST}:{PORT}"
 # 서버 코드를 바꾸면 올립니다. 예전 버전 서버가 떠 있으면 끄고 새로 켭니다.
-SERVER_VERSION = 3
+SERVER_VERSION = 4
 BLOGAUTO_URL = "http://127.0.0.1:37321"
 BLOGAUTO_JOBS_URL = f"{BLOGAUTO_URL}/api/jobs"
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".gif")
@@ -84,10 +84,11 @@ def autopost_settings(url):
 
 
 def send_to_autopost(url, keyword, image, settings):
-    """메인 키워드 하나를 이미지와 함께 포스팅 대기열에 넣습니다. A·B 버튼은 비워서 AI가 만들게 합니다."""
+    """메인 키워드 하나를 포스팅 대기열에 넣습니다. image가 없으면 이미지 없이 올라갑니다.
+    A·B 버튼은 비워서 AI가 만들게 합니다."""
     body = {
         "keywords": keyword,
-        "images": [{"name": image.name, "data": base64.b64encode(image.read_bytes()).decode("ascii")}],
+        "images": [{"name": image.name, "data": base64.b64encode(image.read_bytes()).decode("ascii")}] if image else [],
         "a_buttons": [], "b_buttons": [], "b_common": False,
         "b_site": settings.get("b_site") or "guidejung|publish",
         "a_site": settings.get("a_site") or "gov|publish",
@@ -180,11 +181,9 @@ class Handler(BaseHTTPRequestHandler):
         config = dk.load_config()
         if not config["autopost_enabled"]:
             return {"autopost": False}, None
+        # 이미지가 없어도 보냅니다. 사이트 글은 이미지 없이 올라갑니다.
         image = find_image(keywords[0], config["image_dir"])
-        if not image:
-            raise RuntimeError(f"이미지 폴더({config['image_dir']})에 '{keywords[0]}.png'처럼 키워드와 같은 이름의 "
-                               "이미지를 넣거나, 이미지를 1장만 넣어 두세요.")
-        return {"autopost": True, "image": image.name, "image_dir": str(config["image_dir"])}, image
+        return {"autopost": True, "image": image.name if image else "", "image_dir": str(config["image_dir"])}, image
 
     def _post(self, body, preview=False):
         keywords = self._check_keywords(body)
@@ -193,11 +192,12 @@ class Handler(BaseHTTPRequestHandler):
         config = dk.load_config()
         try:
             plan, image = self._plan(keywords)
+            use_autopost = plan["autopost"]
             if preview:
                 return self._json(200, plan)
             # 둘 중 하나만 올라가는 일이 없도록, 보내기 전에 두 프로그램이 켜져 있는지 먼저 확인합니다.
             check_blogauto()
-            settings = autopost_settings(config["autopost_url"]) if image else None
+            settings = autopost_settings(config["autopost_url"]) if use_autopost else None
             jobs = send_to_blogauto(keywords)
         except RuntimeError as e:
             return self._json(502 if not preview else 400, {"error": str(e)})
@@ -207,11 +207,12 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             db.close()
         result = {"jobs": jobs, "sent": self._sent(), "autopost": 0}
-        if image:
+        if use_autopost:
             try:
                 result["autopost"] = send_to_autopost(config["autopost_url"], keywords[0], image, settings)
-                result["image"] = image.name
-                archive_image(image)
+                result["image"] = image.name if image else ""
+                if image:
+                    archive_image(image)
             except RuntimeError as e:
                 result["warning"] = f"네이버 블로그로는 보냈지만, 사이트 자동 포스팅은 실패했습니다: {e}"
         self._json(200, result)

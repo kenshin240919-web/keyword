@@ -471,7 +471,7 @@ document.addEventListener('click', async e => {
   try { site = await call('/api/post-plan'); }
   catch (err) { return alert('보내지 못했습니다: ' + err.message); }
   const plan = '[네이버 블로그 \u2192 임시저장]\\n' + kws.map((k, i) => ACCOUNTS[i] + ' \u2190 ' + k).join('\\n')
-    + (site.autopost ? '\\n\\n[사이트 자동 포스팅 \u2192 발행]\\nguidejung\u00b7gov \u2190 ' + kws[0] + '\\n이미지: ' + site.image : '');
+    + (site.autopost ? '\\n\\n[사이트 자동 포스팅 \u2192 발행]\\nguidejung\u00b7gov \u2190 ' + kws[0] + '\\n이미지: ' + (site.image || '없음 (이미지 없이 발행)') : '');
   const again = b.classList.contains('sent') ? '이미 보낸 키워드입니다. 다시 보낼까요?\\n\\n' : '';
   if (!confirm(again + plan)) return;
   b.disabled = true;
@@ -479,7 +479,7 @@ document.addEventListener('click', async e => {
     const d = await call('/api/post');
     renderSent(d.sent);
     alert('네이버 블로그 ' + d.jobs + '곳에 보냈습니다 (진행 상황: 크롬 Blog Automator 사이드패널).'
-      + (d.autopost ? '\\n사이트 자동 포스팅도 시작했습니다 (진행 상황: http://127.0.0.1:8777). 쓴 이미지는 사용완료 폴더로 옮겼습니다.' : '')
+      + (d.autopost ? '\\n사이트 자동 포스팅도 시작했습니다 (진행 상황: http://127.0.0.1:8777). ' + (d.image ? ' 쓴 이미지는 사용완료 폴더로 옮겼습니다.' : '(이미지 없이 발행)') : '')
       + (d.warning ? '\\n\\n' + d.warning : ''));
   } catch (err) { alert('보내지 못했습니다: ' + err.message); }
   finally { b.disabled = false; }

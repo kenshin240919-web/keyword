@@ -33,4 +33,4 @@ TELEGRAM_CHAT_ID=...
 - 검색수 범위·가중치·추천 개수·꼭 쓸 개수(must_n)·금칙어: `config.json`
 - 자동 실행 로그: `logs\daily.log`
 - 리포트의 기록 버튼은 이 PC 안에서만 도는 작은 서버(`report_server.py`, 127.0.0.1:8765)를 통해 `history.db`에 저장됩니다. 6시간 동안 쓰지 않으면 스스로 꺼집니다.
-- 이미지 폴더(`config.json`의 `image_dir`, 기본 `D:\guidejung\images`): 메인 키워드와 같은 이름의 이미지(예: `IRP세액공제.png`) 또는 이미지 1장. 쓴 이미지는 `사용완료` 폴더로 옮겨집니다. 사이트 자동 포스팅을 끄려면 `autopost_enabled`를 `false`로.
+- 이미지 폴더(`config.json`의 `image_dir`, 기본 `D:\guidejung\images`): 메인 키워드와 같은 이름의 이미지(예: `IRP세액공제.png`) 또는 이미지 1장. 이미지가 없으면 사이트 글은 이미지 없이 발행됩니다. 쓴 이미지는 `사용완료` 폴더로 옮겨집니다. 사이트 자동 포스팅을 끄려면 `autopost_enabled`를 `false`로.
