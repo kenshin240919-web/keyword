@@ -19,7 +19,7 @@ TELEGRAM_CHAT_ID=...
 | --- | --- |
 | `python keywordstool.py "사주풀이,궁합"` | 키워드 검색수 조회 (최대 5개) |
 | `python daily_keywords.py` | 작년 시즌(1년 전 기준 한 달 뒤 한 달) 검색수로 추천 10개 + 꼭 쓸 3개(★) → `reports\날짜.html`, `.csv` |
-| 리포트의 **블로그 4곳에 보내기** | 메인 키워드 → 1번 블로그, 세부 키워드 3개 → 2~4번 블로그로 Blog Automator에 글 작성·임시저장 요청 (Blog Automator가 켜져 있어야 함) |
+| 리포트의 **블로그 4곳에 보내기** | 메인 키워드 → 1번 블로그, 세부 키워드 3개 → 2~4번 블로그로 Blog Automator에 글 작성·임시저장 요청. 동시에 자동 포스팅 프로그램(8777)에 메인 키워드 + 이미지로 guidejung·gov 발행 요청. 두 프로그램이 모두 켜져 있어야 함 |
 | `open_report.bat` 더블클릭 | 오늘 리포트 열기 (없으면 먼저 만듦) — **'오늘 썼어요' 버튼으로 작성 기록** |
 | `python daily_keywords.py --refresh` | 오늘 결과를 버리고 새로 뽑기 (같은 날 다시 실행하면 첫 결과 유지) |
 | `python daily_keywords.py --written 궁합` | 이미 쓴 키워드로 기록 (이후 추천 제외) |
@@ -33,3 +33,4 @@ TELEGRAM_CHAT_ID=...
 - 검색수 범위·가중치·추천 개수·꼭 쓸 개수(must_n)·금칙어: `config.json`
 - 자동 실행 로그: `logs\daily.log`
 - 리포트의 기록 버튼은 이 PC 안에서만 도는 작은 서버(`report_server.py`, 127.0.0.1:8765)를 통해 `history.db`에 저장됩니다. 6시간 동안 쓰지 않으면 스스로 꺼집니다.
+- 이미지 폴더(`config.json`의 `image_dir`, 기본 `D:\guidejung\images`): 메인 키워드와 같은 이름의 이미지(예: `IRP세액공제.png`) 또는 이미지 1장. 쓴 이미지는 `사용완료` 폴더로 옮겨집니다. 사이트 자동 포스팅을 끄려면 `autopost_enabled`를 `false`로.

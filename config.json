@@ -14,5 +14,8 @@
   },
   "banned_words": [],
   "open_report": true,
-  "must_n": 3
+  "must_n": 3,
+  "autopost_enabled": true,
+  "autopost_url": "http://127.0.0.1:8777",
+  "image_dir": "D:\\guidejung\\images"
 }

@@ -51,6 +51,10 @@ DEFAULT_CONFIG = {
     "banned_words": [],
     "open_report": True,
     "must_n": 3,
+    # '블로그 N곳에 보내기'를 누르면 자동 포스팅 프로그램(autopost, 8777)에도 메인 키워드를 보냅니다.
+    "autopost_enabled": True,
+    "autopost_url": "http://127.0.0.1:8777",
+    "image_dir": r"D:\guidejung\images",   # 메인 키워드와 같은 이름의 이미지(또는 1장만) 넣어 두는 폴더
 }
 TELEGRAM_KEYS = ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID")
 
@@ -455,18 +459,28 @@ document.addEventListener('click', async e => {
   const b = e.target.closest('button.p');
   if (!b || !live) return;
   const kws = JSON.parse(b.dataset.post);
-  const plan = kws.map((k, i) => ACCOUNTS[i] + ' \u2190 ' + k).join('\\n');
-  const again = b.classList.contains('sent') ? '이미 보낸 키워드입니다. 다시 보낼까요?\\n\\n' : '';
-  if (!confirm(again + 'Blog Automator로 보내 글 작성 → 임시저장을 시작합니다.\\n\\n' + plan)) return;
-  b.disabled = true;
-  try {
-    const r = await fetch('/api/post', {method: 'POST',
+  const call = async (url) => {
+    const r = await fetch(url, {method: 'POST',
       headers: {'Content-Type': 'application/json', 'X-Report-App': '1'},
       body: JSON.stringify({keywords: kws})});
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || r.status);
+    return d;
+  };
+  let site;
+  try { site = await call('/api/post-plan'); }
+  catch (err) { return alert('보내지 못했습니다: ' + err.message); }
+  const plan = '[네이버 블로그 \u2192 임시저장]\\n' + kws.map((k, i) => ACCOUNTS[i] + ' \u2190 ' + k).join('\\n')
+    + (site.autopost ? '\\n\\n[사이트 자동 포스팅 \u2192 발행]\\nguidejung\u00b7gov \u2190 ' + kws[0] + '\\n이미지: ' + site.image : '');
+  const again = b.classList.contains('sent') ? '이미 보낸 키워드입니다. 다시 보낼까요?\\n\\n' : '';
+  if (!confirm(again + plan)) return;
+  b.disabled = true;
+  try {
+    const d = await call('/api/post');
     renderSent(d.sent);
-    alert(d.jobs + '개 작업을 보냈습니다. 진행 상황은 크롬의 Blog Automator 사이드패널에서 확인하세요.');
+    alert('네이버 블로그 ' + d.jobs + '곳에 보냈습니다 (진행 상황: 크롬 Blog Automator 사이드패널).'
+      + (d.autopost ? '\\n사이트 자동 포스팅도 시작했습니다 (진행 상황: http://127.0.0.1:8777). 쓴 이미지는 사용완료 폴더로 옮겼습니다.' : '')
+      + (d.warning ? '\\n\\n' + d.warning : ''));
   } catch (err) { alert('보내지 못했습니다: ' + err.message); }
   finally { b.disabled = false; }
 });
