@@ -45,12 +45,13 @@ else {
     Say '[autopost] 켰습니다 (작업 표시줄에 최소화된 창 — 닫으면 꺼집니다).' Green
 }
 
-# 4. shot (8790) — asks for API keys in its own window when they are not set
+# 4. shot (8790) — without the Typecast (grandmother voice) key; asks only for the Gemini key if it is not set
 if (Test-Port 8790) { Say '[shot] 이미 켜져 있음' }
 else {
     $dir = Join-Path $base 'shot'
-    Start-Process -FilePath (Join-Path $dir 'run_typecast.bat') -WorkingDirectory $dir
-    Say '[shot] 켰습니다. 키를 묻는 창이 뜨면 입력해 주세요.' Green
+    Start-Process -FilePath 'powershell.exe' -WorkingDirectory $dir -WindowStyle Minimized `
+        -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $dir 'run_typecast.ps1'), '-NoTypecast'
+    Say '[shot] 켰습니다 (작업 표시줄에 최소화 — 닫으면 꺼집니다. Gemini 키를 묻는 경우에만 창을 열어 입력).' Green
 }
 
 # 5. 블로그 크롬 1~4번 (바탕화면 바로가기, 전용 프로필 BlogAutomator\chrome\chrome-N)
