@@ -104,8 +104,11 @@ foreach ($app in $apps) {
     Say ("[{0}] {1}" -f $app.Name, $dir) White
     if (-not (Test-Path (Join-Path $dir '.git'))) { Say '  git 저장소가 아니어서 건너뜁니다.' Yellow; $problems++; continue }
     $old = (git -C $dir rev-parse HEAD) 2>$null
+    # Fetch into origin/<branch> by an explicit refspec and fast-forward to it. ("git pull origin <branch>"
+    # fails with "Cannot fast-forward to multiple branches" when the clone's fetch settings bring more.)
     # cmd merges git's stderr into plain text (PowerShell 5 would turn it into error records).
-    $out = (cmd /c "git -C `"$dir`" pull --ff-only origin $($app.Branch) 2>&1" | Out-String).Trim()
+    $ref = "refs/remotes/origin/$($app.Branch)"
+    $out = (cmd /c "git -C `"$dir`" fetch origin +refs/heads/$($app.Branch):$ref 2>&1 && git -C `"$dir`" merge --ff-only $ref 2>&1" | Out-String).Trim()
     if ($LASTEXITCODE -ne 0) {
         Say "  받기 실패: $out" Red
         Say '  (이 폴더에서 직접 고친 파일이 있으면 생길 수 있습니다. 이 내용을 Claude에게 보여 주세요.)' Red
