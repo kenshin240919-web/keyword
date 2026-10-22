@@ -71,11 +71,16 @@ foreach ($n in 1..4) {
     Start-Sleep 2
 }
 
-# 6. Flow용 크롬 (평소 쓰는 크롬, Google 로그인). The Shot Flow extension opens the Flow tab itself when work comes.
-$mainChrome = $chromeLines | Where-Object { $_ -and $_ -notlike '*BlogAutomator\chrome*' -and $_ -notlike '*--type=*' }
-if ($mainChrome) { Say '[Flow용 크롬] 이미 켜져 있음' }
-elseif ($chrome) { Start-Process -FilePath $chrome -ArgumentList 'https://flow.google.com/'; Say '[Flow용 크롬] 켰습니다.' Green }
-else { Say '[Flow용 크롬] 크롬을 찾지 못했습니다. 직접 켜 주세요.' Yellow }
+# 6. Flow 전용 크롬 (D:\guidejung\chrome-flow 프로필: Google 로그인 + Shot Flow 확장). The extension opens
+#    the Flow tab itself when work comes; the desktop shortcut 'Flow 영상 크롬' is made by 업데이트.bat.
+$flowProfile = Join-Path $base 'chrome-flow'
+if ($chromeLines | Where-Object { $_ -and $_ -like '*chrome-flow*' }) { Say '[Flow 전용 크롬] 이미 켜져 있음' }
+elseif ($chrome) {
+    Start-Process -FilePath $chrome -WindowStyle Minimized -ArgumentList "--user-data-dir=`"$flowProfile`"", '--disable-renderer-backgrounding',
+        '--disable-background-timer-throttling', '--disable-backgrounding-occluded-windows', 'https://flow.google.com/'
+    Say '[Flow 전용 크롬] 켰습니다 (최소화).' Green
+}
+else { Say '[Flow 전용 크롬] 크롬을 찾지 못했습니다. 직접 켜 주세요.' Yellow }
 
 # 7. 리포트 + 전체 진행 상황
 Say '프로그램이 준비되기를 기다리는 중...'

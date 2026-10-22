@@ -160,5 +160,20 @@ if ($shortcut -and -not (Test-Path $shortcut)) {
     } catch { Say "바탕화면 바로가기를 만들지 못했습니다: $($_.Exception.Message)" Yellow }
 }
 
+# Desktop shortcut for the Flow Chrome: its own profile (D:\guidejung\chrome-flow), kept rendering while minimized.
+$flowShortcut = if ($desktop) { Join-Path $desktop 'Flow 영상 크롬.lnk' } else { $null }
+$chromePath = @((Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe' -ErrorAction SilentlyContinue).'(default)',
+    "$env:ProgramFiles\Google\Chrome\Application\chrome.exe", "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
+    "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe") | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+if ($flowShortcut -and $chromePath -and -not (Test-Path $flowShortcut)) {
+    try {
+        $lnk = (New-Object -ComObject WScript.Shell).CreateShortcut($flowShortcut)
+        $lnk.TargetPath = $chromePath
+        $lnk.Arguments = "--user-data-dir=`"$(Join-Path $base 'chrome-flow')`" --disable-renderer-backgrounding --disable-background-timer-throttling --disable-backgrounding-occluded-windows https://flow.google.com/"
+        $lnk.Save()
+        Say "바탕화면에 'Flow 영상 크롬' 바로가기를 만들었습니다."
+    } catch { Say "Flow 크롬 바로가기를 만들지 못했습니다: $($_.Exception.Message)" Yellow }
+}
+
 if ($problems) { Say "=== 끝 (확인할 것 $problems 건, 위 노란색·빨간색 줄) ===" Yellow }
 else { Say '=== 끝 (모두 정상) ===' Green }

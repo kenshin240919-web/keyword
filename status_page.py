@@ -69,7 +69,7 @@ def overview():
                          "fix": f"바탕화면 '블로그 {n}번' 바로가기"})
     last_flow = flow_poll.get("last_poll")
     programs.append({"name": "Flow 크롬", "ok": bool(last_flow) and now - last_flow < ALIVE_SECONDS,
-                     "fix": "Google 로그인된 크롬 (Shot Flow 확장 · 자동 생성 켜기)"})
+                     "fix": "바탕화면 'Flow 영상 크롬' (Shot Flow 확장 · 자동 생성 켜기)"})
 
     # Latest keyword sent from the report: the newest Blog Automator jobs that carry ctaKeyword.
     jobs = [j for j in (blog or {}).get("jobs", []) if j.get("ctaKeyword")]
