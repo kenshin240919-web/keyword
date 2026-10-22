@@ -53,6 +53,7 @@ TEMPLATES = {
            "mid": {"color": "#fd6f22", "outline": (NAVY, 17), "box": (78, 259, 1324, 429), "erase": (236, 455)},
            "btn": {"color": "#000000", "fill": "#fff16c", "box": (91, 517, 1023, 692)}},
 }
+UNSAFE_FILENAME = re.compile(r'[\\/:*?"<>|]')
 MIN_SQUEEZE = 0.75   # 글자가 길면 가로로 이만큼까지 좁히고, 그래도 길면 글자 크기를 줄입니다.
 MAX_GROW = 1.25      # 글자가 짧으면 원본처럼 가로를 채우도록 키우되, 원본 높이의 이 배수까지만.
 
@@ -141,6 +142,7 @@ def render(keyword, phrase, button, out_dir, asset_dir=ASSET_DIR):
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     button_text = f"바로 {button}"
+    safe_name = UNSAFE_FILENAME.sub("_", keyword)   # 윈도우 파일 이름에 못 쓰는 글자는 _
     saved = {}
     for name, spec in TEMPLATES.items():
         img = Image.open(templates[name]).convert("RGBA")
@@ -157,7 +159,7 @@ def render(keyword, phrase, button, out_dir, asset_dir=ASSET_DIR):
         _draw_line(img, keyword, TEMPLATE_TEXT["top"], title_font, spec["top"])
         _draw_line(img, phrase, TEMPLATE_TEXT["mid"], title_font, spec["mid"])
         _draw_line(img, button_text, TEMPLATE_TEXT["btn"], button_font, spec["btn"], align="left")
-        path = out_dir / f"{re.sub(r'[\\/:*?\"<>|]', '_', keyword)}_{name}.png"   # 윈도우 파일 이름에 못 쓰는 글자는 _
+        path = out_dir / f"{safe_name}_{name}.png"
         img.convert("RGB").save(path)
         saved[name] = path
     return saved

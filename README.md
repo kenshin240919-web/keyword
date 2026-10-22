@@ -24,7 +24,8 @@ TELEGRAM_CHAT_ID=...
 | `python daily_keywords.py --refresh` | 오늘 결과를 버리고 새로 뽑기 (같은 날 다시 실행하면 첫 결과 유지) |
 | `python daily_keywords.py --written 궁합` | 이미 쓴 키워드로 기록 (이후 추천 제외) |
 | `python daily_keywords.py --unwritten 궁합` | 잘못 기록한 키워드 취소 |
-| `setup_task.bat` 더블클릭 | 자동 실행 등록: 로그인할 때 + 매일 07:50 (하루 1번만) |
+| `setup_task.bat` 더블클릭 | 자동 실행 등록: 로그인할 때 + 매일 07:50 (하루 1번만). 실행할 때마다 먼저 4개 프로그램을 업데이트 |
+| `D:\guidejung\업데이트.bat` 더블클릭 | key·BlogAutomator·autopost·shot을 GitHub 최신으로 받고, 새 코드를 받은 프로그램이 켜져 있으면 다시 켬 (`update_all.ps1`, 기록 `logs\update.log`). 처음 한 번은 `update_all.bat`으로 실행하면 `업데이트.bat`이 만들어짐 |
 
 - 씨앗 키워드: `seeds.txt` (한 줄에 하나)
 - 작년 시즌 검색수 = 현재 월 검색수 × 데이터랩 추이 비율 (추정값)
