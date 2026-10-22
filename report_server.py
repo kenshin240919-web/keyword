@@ -34,6 +34,7 @@ try:
 except ImportError:
     thumbnail = None
 import keywordstool
+import status_page
 
 HOST = "127.0.0.1"
 PORT = 8765
@@ -41,7 +42,7 @@ IDLE_LIMIT = 6 * 3600
 REPORT_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}\.(html|csv)$")
 BASE_URL = f"http://{HOST}:{PORT}"
 # 서버 코드를 바꾸면 올립니다. 예전 버전 서버가 떠 있으면 끄고 새로 켭니다.
-SERVER_VERSION = 6
+SERVER_VERSION = 7
 LOG_PATH = dk.BASE_DIR / "logs" / "report_server.log"
 
 
@@ -272,6 +273,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"ok": True, "version": SERVER_VERSION})
         if path == "/api/written":
             return self._json(200, {"keywords": self._written()})
+        if path == "/status":
+            return self._send(200, status_page.STATUS_HTML, "text/html; charset=utf-8")
+        if path == "/api/overview":
+            return self._json(200, status_page.overview())
         if path == "/api/sent":
             return self._json(200, {"keywords": self._sent()})
         if path == "/":

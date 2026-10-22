@@ -143,5 +143,22 @@ if (-not (Test-Path $launcher) -or [IO.File]::ReadAllText($launcher) -ne $launch
     Say "더블클릭용 $launcher 을(를) 만들었습니다."
 }
 
+# One-click start of every program, plus a desktop shortcut to it.
+$starter = Join-Path $base '전체실행.bat'
+$starterText = "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"%~dp0key\start_all.ps1`"`r`n"
+if (-not (Test-Path $starter) -or [IO.File]::ReadAllText($starter) -ne $starterText) {
+    [IO.File]::WriteAllText($starter, $starterText, [Text.Encoding]::ASCII)
+    Say "한 번에 켜기용 $starter 을(를) 만들었습니다."
+}
+$desktop = [Environment]::GetFolderPath('Desktop')
+$shortcut = if ($desktop) { Join-Path $desktop 'guidejung 전체 실행.lnk' } else { $null }
+if ($shortcut -and -not (Test-Path $shortcut)) {
+    try {
+        $lnk = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut)
+        $lnk.TargetPath = $starter; $lnk.WorkingDirectory = $base; $lnk.Save()
+        Say "바탕화면에 'guidejung 전체 실행' 바로가기를 만들었습니다."
+    } catch { Say "바탕화면 바로가기를 만들지 못했습니다: $($_.Exception.Message)" Yellow }
+}
+
 if ($problems) { Say "=== 끝 (확인할 것 $problems 건, 위 노란색·빨간색 줄) ===" Yellow }
 else { Say '=== 끝 (모두 정상) ===' Green }
