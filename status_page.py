@@ -120,13 +120,14 @@ def _write_state(job):
 
 
 def _video_state(flow, done, job):
+    via = f" ({flow['engine']})" if flow.get("engine") else ""
     if done.get("done"):
-        return {"icon": "ok", "text": "완성 (자막·내레이션)"}
+        return {"icon": "ok", "text": f"완성{via}"}
     status = flow.get("status")
     if status == "running":
         return {"icon": "run", "text": flow.get("step") or "Flow 생성 중"}
     if status == "done":
-        return {"icon": "run", "text": "자막·내레이션 입히는 중"}
+        return {"icon": "run", "text": f"자막·내레이션 입히는 중{via}"}
     if status == "error":
         return {"icon": "err", "text": flow.get("error") or "Flow 실패 (확장 패널에서 다시 시도)"}
     if status == "skipped":
