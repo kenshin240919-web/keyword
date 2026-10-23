@@ -42,7 +42,7 @@ IDLE_LIMIT = 6 * 3600
 REPORT_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}\.(html|csv)$")
 BASE_URL = f"http://{HOST}:{PORT}"
 # 서버 코드를 바꾸면 올립니다. 예전 버전 서버가 떠 있으면 끄고 새로 켭니다.
-SERVER_VERSION = 13
+SERVER_VERSION = 14
 LOG_PATH = dk.BASE_DIR / "logs" / "report_server.log"
 
 
@@ -321,7 +321,7 @@ class Handler(BaseHTTPRequestHandler):
     def _do_post(self):
         Handler.last_seen = time.time()
         # 다른 웹사이트가 몰래 기록을 바꾸지 못하도록, 리포트 페이지만 붙이는 헤더를 요구합니다.
-        if self.path not in ("/api/written", "/api/post", "/api/post-plan", "/api/shutdown") or self.headers.get("X-Report-App") != "1":
+        if self.path not in ("/api/written", "/api/post", "/api/post-plan", "/api/shutdown", "/api/action") or self.headers.get("X-Report-App") != "1":
             return self._json(403, {"error": "forbidden"})
         if self.path == "/api/shutdown":
             self._json(200, {"ok": True})
@@ -330,6 +330,11 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
             if self.path in ("/api/post", "/api/post-plan"):
                 return self._post(body, preview=self.path == "/api/post-plan")
+            if self.path == "/api/action":  # 진행 상황 페이지의 버튼 (다시 시도·영상 없이 저장·다시 시작)
+                try:
+                    return self._json(200, {"message": status_page.act(body)})
+                except ValueError as e:
+                    return self._json(400, {"error": str(e)})
             keyword = dk.normalize(body.get("keyword", ""))
         except (ValueError, AttributeError):
             return self._json(400, {"error": "bad request"})

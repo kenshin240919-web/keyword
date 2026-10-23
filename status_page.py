@@ -86,7 +86,7 @@ def overview():
         st = (job or {}).get("styles", {}).get(str(n)) or {}
         f, d = flows.get(n) or {}, done.get(n) or {}
         rows.append({
-            "blog": n, "keyword": (job or {}).get("keyword", ""),
+            "blog": n, "keyword": (job or {}).get("keyword", ""), "actions": _actions(job, st, f),
             "write": _write_state(job),
             "video": _video_state(f, d, job),
             "link": _link_state(job, (blog or {}).get("qrTasks") or [], (blog or {}).get("config", {}).get("qrBlog") or 1,
@@ -132,6 +132,76 @@ def _write_state(job):
     if status == "failed":
         return {"icon": "err", "text": job.get("error") or "작성 실패"}
     return {"icon": "ok", "text": "완료"}
+
+
+IS_QR = ("site.naver.com", "naver.me")
+
+
+def _actions(job, st, flow):
+    """Buttons for this blog's row: {column: [{label, act, ...}]} (handled by POST /api/action)."""
+    if not job:
+        return {}
+    out = {"video": [], "naver": []}
+    if flow.get("status") == "error" and flow.get("pid"):
+        out["video"].append({"label": "영상 다시 만들기", "act": "flow_retry", "pid": flow["pid"]})
+    status = st.get("status")
+    if status == "video":
+        out["video"].append({"label": "영상 없이 저장", "act": "skip_video", "job": job["id"]})
+    if status == "link":
+        out["naver"].append({"label": "링크 없이 저장", "act": "skip_link", "job": job["id"]})
+    if status in ("saved", "error"):
+        out["naver"].append({"label": "다시 시작" if status == "saved" else "다시 시도", "act": "restart",
+                             "job": job["id"], "style": job.get("style"), "confirm": status == "saved"})
+    return out
+
+
+def act(body):
+    """Runs a status-page button: asks shot or Blog Automator to do it. Returns a short message."""
+    kind = body.get("act")
+    if kind == "flow_retry":
+        _post(f"{SHOT}/api/flow/{_id(body.get('pid'))}/retry", {}, {"X-Shot-Flow": "1"})
+        return "영상을 다시 만듭니다 (Flow, 실패하면 1번 더 시도)."
+    job = _id(body.get("job"))
+    if kind == "skip_video":
+        _post(f"{BLOGAUTO}/api/jobs/{job}/video", {"skip": True})
+        return "영상 없이 임시저장합니다."
+    if kind == "skip_link":
+        _post(f"{BLOGAUTO}/api/link", {"jobId": job, "skip": True})
+        return "링크 없이 임시저장합니다."
+    if kind == "restart":
+        info = next((j for j in (_get(f"{BLOGAUTO}/api/status", {"X-Blogauto": "1"}) or {}).get("jobs", []) if j.get("id") == job), None)
+        if not info:
+            raise ValueError("작업을 찾을 수 없습니다.")
+        if info.get("siteUrl") and not any(q in str(info.get("link") or "") for q in IS_QR):
+            _post(f"{BLOGAUTO}/api/jobs/{job}/relink", {})
+            return "네이버 QR 주소를 먼저 만들고, 글 전체를 다시 임시저장합니다."
+        _post(f"{BLOGAUTO}/api/jobs/{job}/styles/{int(info.get('style') or body.get('style'))}", {"status": "retry"})
+        return "글 전체를 다시 임시저장합니다."
+    raise ValueError("알 수 없는 동작입니다.")
+
+
+def _id(value):
+    value = str(value or "")
+    if not value or not all(c.isalnum() or c in "_-" for c in value):
+        raise ValueError("잘못된 작업 번호입니다.")
+    return value
+
+
+def _post(url, body, headers=None):
+    req = urllib.request.Request(url, data=json.dumps(body, ensure_ascii=False).encode("utf-8"), method="POST",
+                                 headers={"Content-Type": "application/json", "X-Blogauto": "1", **(headers or {})})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read().decode("utf-8") or "null")
+    except urllib.error.HTTPError as e:
+        try:
+            detail = json.loads(e.read().decode("utf-8"))
+            message = detail.get("error") or detail.get("detail")
+        except ValueError:
+            message = ""
+        raise ValueError(message or f"HTTP {e.code}") from None
+    except (urllib.error.URLError, OSError):
+        raise ValueError("프로그램에 연결하지 못했습니다 (꺼져 있는지 확인).") from None
 
 
 def _link_state(job, qr_tasks, qr_blog, qr_check=None):
@@ -216,6 +286,7 @@ STATUS_HTML = """<!doctype html>
   .post:first-of-type { border-top:0; }
   .tag { font-size:12px; padding:2px 8px; border-radius:10px; background:#eef2ff; color:#3730a3; white-space:nowrap; }
   .post .url { color:var(--muted); font-size:13px; word-break:break-all; }
+  .acts { margin-top:6px; } .act { border:1px solid var(--run); color:var(--run); background:#fff; border-radius:6px; padding:3px 9px; cursor:pointer; font:inherit; font-size:13px; margin:2px 4px 0 0; }
   .post button { border:1px solid var(--line); background:#fff; border-radius:6px; padding:4px 10px; cursor:pointer; font:inherit; font-size:13px; }
   a { color:var(--run); }
   @media (max-width: 700px) { th:nth-child(2), td:nth-child(2) { display:none; } }
@@ -233,7 +304,8 @@ STATUS_HTML = """<!doctype html>
 <script>
 const ICON = { ok: '✅', run: '⏳', err: '❌', warn: '⚠️', wait: '·' };
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const cell = s => `<td class="${s.icon}">${ICON[s.icon] || ''} ${esc(s.text)}</td>`;
+const btns = list => (list || []).map(a => `<button class="act" data-act='${esc(JSON.stringify(a))}'>${esc(a.label)}</button>`).join(' ');
+const cell = (s, acts) => `<td class="${s.icon}">${ICON[s.icon] || ''} ${esc(s.text)}${acts && acts.length ? `<div class="acts">${btns(acts)}</div>` : ''}</td>`;
 async function refresh() {
   try {
     const d = await (await fetch('/api/overview', { cache: 'no-store' })).json();
@@ -241,8 +313,9 @@ async function refresh() {
     document.getElementById('programs').innerHTML = d.programs.map(p =>
       `<span class="chip ${p.ok ? '' : 'off'}">${p.ok ? '●' : '○'} ${esc(p.name)}${p.ok || !p.fix ? '' : `<small>→ ${esc(p.fix)}</small>`}</span>`).join('');
     document.getElementById('title').textContent = d.keyword ? `키워드: ${d.keyword}` : '진행 중인 키워드 없음 (리포트에서 블로그 4곳에 보내기)';
-    document.getElementById('rows').innerHTML = d.rows.map(r =>
-      `<tr><td><b>${r.blog}번</b></td><td>${esc(r.keyword)}</td>${cell(r.write)}${cell(r.video)}${cell(r.link)}${cell(r.naver)}</tr>`).join('');
+    const rowsHtml = d.rows.map(r =>
+      `<tr><td><b>${r.blog}번</b></td><td>${esc(r.keyword)}</td>${cell(r.write)}${cell(r.video, r.actions.video)}${cell(r.link)}${cell(r.naver, r.actions.naver)}</tr>`).join('');
+    if (rowsHtml !== lastRows) { document.getElementById('rows').innerHTML = rowsHtml; lastRows = rowsHtml; }
     const s = d.site;
     const html = !s ? '이 키워드의 사이트 작업 없음' :
       `<div class="${s.state === '완료' ? 'ok' : s.state === '실패' ? 'err' : 'run'}">${esc(s.state)}</div>
@@ -258,7 +331,21 @@ async function refresh() {
     document.getElementById('at').textContent = '상태를 읽지 못했습니다';
   }
 }
-let lastSite = '';
+let lastSite = '', lastRows = '';
+// Row buttons: 영상 다시 만들기 / 영상 없이 저장 / 링크 없이 저장 / 다시 시작 — all from this page.
+document.getElementById('rows').addEventListener('click', async e => {
+  if (!e.target.dataset.act) return;
+  const a = JSON.parse(e.target.dataset.act);
+  if (a.confirm && !confirm('이 블로그 글을 처음부터 다시 써서 임시저장합니다.\\n이상하게 들어간 예전 임시저장 글은 네이버에서 직접 지워 주세요. 다시 시작할까요?')) return;
+  e.target.disabled = true; e.target.textContent = '요청 중…';
+  try {
+    const r = await fetch('/api/action', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Report-App': '1' }, body: JSON.stringify(a) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || r.status);
+    e.target.textContent = '✓ ' + d.message;
+  } catch (err) { alert('하지 못했습니다: ' + err.message); }
+  lastRows = ''; setTimeout(refresh, 1500);
+});
 document.getElementById('site').addEventListener('click', async e => {
   const url = e.target.dataset.copy;
   if (!url) return;
