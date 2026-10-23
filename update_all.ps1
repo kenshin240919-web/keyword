@@ -22,7 +22,7 @@ $branch = 'claude/practical-hypatia-qnp7l5'
 $apps = @(
     @{ Name = '키워드 리포트'; Dir = 'key'; Branch = $branch; Port = 8765 },
     @{ Name = 'BlogAutomator'; Dir = 'BlogAutomator'; Branch = $branch; Port = 37321 },
-    @{ Name = 'autopost'; Dir = 'move\autopost'; Branch = 'main'; Port = 8777 },
+    @{ Name = 'autopost'; Dir = 'move\autopost'; Branch = $branch; Port = 8777 },  # main + Claude's changes
     @{ Name = 'shot'; Dir = 'shot'; Branch = $branch; Port = 8790 }
 )
 $nodeDir = 'C:\Program Files\nodejs'
