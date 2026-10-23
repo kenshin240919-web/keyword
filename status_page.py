@@ -89,11 +89,18 @@ def overview():
             "naver": _naver_state(st, job),
         })
     site = None
+    # Which WordPress site each post went to: match its address to autopost's site list {name: public url}.
+    publics = sorted(((name, str(url).rstrip("/")) for name, url in ((auto or {}).get("sites") or {}).items() if url),
+                     key=lambda x: -len(x[1]))  # gov.guidejung.com before guidejung.com
+    def site_name(url):
+        host = str(url).split("//")[-1]
+        return next((name for name, pub in publics if host.startswith(pub.split("//")[-1])), "")
     for j in (auto or {}).get("jobs", []):
         if keyword and j.get("keyword") == keyword:
             result = j.get("result") or {}
-            site = {"state": j.get("state"), "links": [{"title": v.get("title", k), "url": v.get("public")}
-                                                       for k, v in result.items() if isinstance(v, dict) and v.get("public")],
+            site = {"state": j.get("state"),
+                    "links": [{"site": site_name(v.get("public")), "title": v.get("title", k), "url": v.get("public")}
+                              for k, v in sorted(result.items()) if isinstance(v, dict) and v.get("public")],
                     "last": (j.get("log") or [""])[-1] if j.get("log") else ""}
     return {"programs": programs, "keyword": keyword, "rows": rows, "site": site, "at": time.strftime("%H:%M:%S")}
 
@@ -173,6 +180,11 @@ STATUS_HTML = """<!doctype html>
   th { color:var(--muted); font-weight:normal; border-top:0; }
   .ok { color:var(--ok); } .run { color:var(--run); } .err { color:var(--err); } .warn { color:var(--warn); } .wait { color:var(--muted); }
   .note { color:var(--muted); font-size:13px; }
+  .post { display:flex; align-items:center; gap:10px; padding:8px 0; border-top:1px solid var(--line); flex-wrap:wrap; }
+  .post:first-of-type { border-top:0; }
+  .tag { font-size:12px; padding:2px 8px; border-radius:10px; background:#eef2ff; color:#3730a3; white-space:nowrap; }
+  .post .url { color:var(--muted); font-size:13px; word-break:break-all; }
+  .post button { border:1px solid var(--line); background:#fff; border-radius:6px; padding:4px 10px; cursor:pointer; font:inherit; font-size:13px; }
   a { color:var(--run); }
   @media (max-width: 700px) { th:nth-child(2), td:nth-child(2) { display:none; } }
 </style></head>
@@ -200,14 +212,27 @@ async function refresh() {
     document.getElementById('rows').innerHTML = d.rows.map(r =>
       `<tr><td><b>${r.blog}번</b></td><td>${esc(r.keyword)}</td>${cell(r.write)}${cell(r.video)}${cell(r.naver)}</tr>`).join('');
     const s = d.site;
-    document.getElementById('site').innerHTML = !s ? '이 키워드의 사이트 작업 없음' :
-      `<span class="${s.state === '완료' ? 'ok' : s.state === '실패' ? 'err' : 'run'}">${esc(s.state)}</span>
-       ${s.links.map(l => ` · <a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.title)}</a>`).join('')}
+    const html = !s ? '이 키워드의 사이트 작업 없음' :
+      `<div class="${s.state === '완료' ? 'ok' : s.state === '실패' ? 'err' : 'run'}">${esc(s.state)}</div>
+       ${s.links.map(l => `<div class="post"><span class="tag">${esc(l.site || '사이트')}</span>
+         <a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.title)}</a>
+         <span class="url">${esc(l.url)}</span><button data-copy="${esc(l.url)}">주소 복사</button></div>`).join('')}
        ${s.state !== '완료' && s.last ? `<div class="note">${esc(s.last)}</div>` : ''}`;
+    // Redraw only when it changed, so a "복사됨" label is not wiped by the 3-second refresh.
+    if (html !== lastSite) { document.getElementById('site').innerHTML = html; lastSite = html; }
   } catch (e) {
     document.getElementById('at').textContent = '상태를 읽지 못했습니다';
   }
 }
+let lastSite = '';
+document.getElementById('site').addEventListener('click', async e => {
+  const url = e.target.dataset.copy;
+  if (!url) return;
+  try { await navigator.clipboard.writeText(url); }
+  catch { const t = document.createElement('textarea'); t.value = url; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); }
+  e.target.textContent = '복사됨 ✓';
+  setTimeout(() => { e.target.textContent = '주소 복사'; }, 1500);
+});
 refresh(); setInterval(refresh, 3000);
 </script>
 </body></html>
