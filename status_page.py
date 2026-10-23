@@ -89,6 +89,7 @@ def overview():
             "blog": n, "keyword": (job or {}).get("keyword", ""),
             "write": _write_state(job),
             "video": _video_state(f, d, job),
+            "link": _link_state(job, (blog or {}).get("qrTasks") or [], (blog or {}).get("config", {}).get("qrBlog") or 1),
             "naver": _naver_state(st, job),
         })
     site = None
@@ -105,6 +106,9 @@ def overview():
                     "links": [{"site": site_name(v.get("public")), "title": v.get("title", k), "url": v.get("public")}
                               for k, v in sorted(result.items()) if isinstance(v, dict) and v.get("public")],
                     "last": (j.get("log") or [""])[-1] if j.get("log") else ""}
+    qr = next((j["link"] for j in jobs if "site.naver.com" in str(j.get("link") or "")), "")
+    if site is not None and qr:
+        site["qr"] = qr
     return {"programs": programs, "keyword": keyword, "rows": rows, "site": site, "at": time.strftime("%H:%M:%S")}
 
 
@@ -127,6 +131,25 @@ def _write_state(job):
     if status == "failed":
         return {"icon": "err", "text": job.get("error") or "작성 실패"}
     return {"icon": "ok", "text": "완료"}
+
+
+def _link_state(job, qr_tasks, qr_blog):
+    """Yellow box + thumbnail link: gov post → Naver QR short link (made by blog qr_blog's Chrome)."""
+    if not job:
+        return {"icon": "wait", "text": "-"}
+    link, note = str(job.get("link") or ""), job.get("linkNote") or ""
+    if job.get("waitLink"):
+        if not job.get("siteUrl"):
+            return {"icon": "wait", "text": "gov 글 발행 기다리는 중"}
+        task = next((t for t in qr_tasks if t.get("ctaKeyword") == job.get("ctaKeyword")), {})
+        if task.get("status") == "running":
+            return {"icon": "run", "text": f"QR 만드는 중 (블로그 {qr_blog}번 크롬)"}
+        return {"icon": "run", "text": f"QR 차례 기다리는 중 (블로그 {qr_blog}번 크롬)"}
+    if "site.naver.com" in link or "naver.me" in link:
+        return {"icon": "ok", "text": f"QR 링크 {link}"}
+    if link:
+        return {"icon": "warn", "text": note or f"링크 {link}"}
+    return {"icon": "warn" if note else "wait", "text": note or "-"}
 
 
 def _video_state(flow, done, job):
@@ -152,7 +175,7 @@ def _naver_state(st, job):
     if status == "video":
         return {"icon": "wait", "text": "영상 기다리는 중"}
     if status == "link":
-        return {"icon": "wait", "text": "gov 글 주소 기다리는 중"}
+        return {"icon": "wait", "text": "③ QR 링크 기다리는 중"}
     if status == "pending":
         return {"icon": "wait", "text": "크롬 차례 기다리는 중"}
     if status == "running":
@@ -199,8 +222,8 @@ STATUS_HTML = """<!doctype html>
   <section><h2>프로그램</h2><div class="chips" id="programs"></div>
     <p class="note">빨간 항목은 꺼져 있거나 연결되지 않은 것입니다. 이름 옆 안내대로 켜 주세요.</p></section>
   <section><h2 id="title">진행 중인 키워드 없음</h2>
-    <table><thead><tr><th>블로그</th><th>키워드</th><th>① 글 작성</th><th>② 숏폼 영상</th><th>③ 네이버 임시저장</th></tr></thead><tbody id="rows"></tbody></table></section>
-  <section><h2>사이트 발행 (guidejung · gov)</h2><div id="site" class="note">-</div></section>
+    <table><thead><tr><th>블로그</th><th>키워드</th><th>① 글 작성</th><th>② 숏폼 영상</th><th>③ QR 링크</th><th>④ 네이버 임시저장</th></tr></thead><tbody id="rows"></tbody></table></section>
+  <section><h2>사이트 발행 (guidejung · gov) · 네이버 QR</h2><div id="site" class="note">-</div></section>
   <p class="note">3초마다 자동으로 새로 고칩니다. 리포트: <a href="/">오늘 리포트 열기</a></p>
 </main>
 <script>
@@ -215,14 +238,16 @@ async function refresh() {
       `<span class="chip ${p.ok ? '' : 'off'}">${p.ok ? '●' : '○'} ${esc(p.name)}${p.ok || !p.fix ? '' : `<small>→ ${esc(p.fix)}</small>`}</span>`).join('');
     document.getElementById('title').textContent = d.keyword ? `키워드: ${d.keyword}` : '진행 중인 키워드 없음 (리포트에서 블로그 4곳에 보내기)';
     document.getElementById('rows').innerHTML = d.rows.map(r =>
-      `<tr><td><b>${r.blog}번</b></td><td>${esc(r.keyword)}</td>${cell(r.write)}${cell(r.video)}${cell(r.naver)}</tr>`).join('');
+      `<tr><td><b>${r.blog}번</b></td><td>${esc(r.keyword)}</td>${cell(r.write)}${cell(r.video)}${cell(r.link)}${cell(r.naver)}</tr>`).join('');
     const s = d.site;
     const html = !s ? '이 키워드의 사이트 작업 없음' :
       `<div class="${s.state === '완료' ? 'ok' : s.state === '실패' ? 'err' : 'run'}">${esc(s.state)}</div>
        ${s.links.map(l => `<div class="post"><span class="tag">${esc(l.site || '사이트')}</span>
          <a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.title)}</a>
          <span class="url">${esc(l.url)}</span><button data-copy="${esc(l.url)}">주소 복사</button></div>`).join('')}
-       ${s.state !== '완료' && s.last ? `<div class="note">${esc(s.last)}</div>` : ''}`;
+       ${s.qr ? `<div class="post"><span class="tag">네이버 QR</span><span>노란 표·썸네일 링크</span>
+         <span class="url">${esc(s.qr)}</span><button data-copy="${esc(s.qr)}">주소 복사</button></div>` : ''}
+       ${s.last ? `<div class="note">${s.state === '완료' ? '마지막 기록' : '지금'}: ${esc(s.last)}</div>` : ''}`;
     // Redraw only when it changed, so a "복사됨" label is not wiped by the 3-second refresh.
     if (html !== lastSite) { document.getElementById('site').innerHTML = html; lastSite = html; }
   } catch (e) {
