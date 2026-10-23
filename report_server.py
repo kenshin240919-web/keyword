@@ -420,9 +420,15 @@ def main():
     keywordstool.setup_console()
     parser = argparse.ArgumentParser(description="리포트 보기 + '오늘 썼어요' 기록 서버")
     parser.add_argument("--serve", action="store_true", help="서버만 실행")
+    parser.add_argument("--status", action="store_true", help="(서버가 꺼져 있으면 켜고) 전체 진행 상황 페이지를 엽니다")
     args = parser.parse_args()
     if args.serve:
         serve()
+    elif args.status:
+        if start_background():
+            webbrowser.open(f"{BASE_URL}/status")
+        else:
+            dk.log("[경고] 리포트 서버를 켜지 못했습니다. logs\\report_server.log를 확인해 주세요.")
     else:
         open_report()
 

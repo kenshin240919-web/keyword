@@ -85,9 +85,10 @@ else { Say '[Flow 전용 크롬] 크롬을 찾지 못했습니다. 직접 켜 �
 # 7. 리포트 + 전체 진행 상황
 Say '프로그램이 준비되기를 기다리는 중...'
 $null = Wait-Port 37321 30
+# The status page first (starts the report server by itself), then the report (may take a while on the first run of the day).
+Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', 'progress.bat' -WorkingDirectory $PSScriptRoot -WindowStyle Minimized
+Say '[전체 진행 상황] 여는 중' Green
 Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', 'open_report.bat' -WorkingDirectory $PSScriptRoot -WindowStyle Minimized
-if (Wait-Port 8765 60) { Start-Process 'http://127.0.0.1:8765/status'; Say '[전체 진행 상황] 열었습니다.' Green }
-else { Say '[전체 진행 상황] 리포트 서버가 아직 안 켜졌습니다. 잠시 뒤 http://127.0.0.1:8765/status 를 열어 주세요.' Yellow }
 
 Say '=== 끝 — 빨간 항목은 진행 상황 페이지에서 확인하세요. 이 창은 10초 뒤 닫힙니다. ===' Cyan
 Start-Sleep 10

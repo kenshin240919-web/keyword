@@ -168,6 +168,16 @@ if ($shortcut -and -not (Test-Path $shortcut)) {
     } catch { Say "바탕화면 바로가기를 만들지 못했습니다: $($_.Exception.Message)" Yellow }
 }
 
+# Desktop shortcut to the overall status page (starts the report server when it is off).
+$statusShortcut = if ($desktop) { Join-Path $desktop 'guidejung 진행 상황.lnk' } else { $null }
+if ($statusShortcut -and -not (Test-Path $statusShortcut)) {
+    try {
+        $lnk = (New-Object -ComObject WScript.Shell).CreateShortcut($statusShortcut)
+        $lnk.TargetPath = Join-Path $PSScriptRoot 'progress.bat'; $lnk.WorkingDirectory = $PSScriptRoot; $lnk.WindowStyle = 7; $lnk.Save()
+        Say "바탕화면에 'guidejung 진행 상황' 바로가기를 만들었습니다."
+    } catch { Say "진행 상황 바로가기를 만들지 못했습니다: $($_.Exception.Message)" Yellow }
+}
+
 # Desktop shortcut for the Flow Chrome: its own profile (D:\guidejung\chrome-flow), kept rendering while minimized.
 $flowShortcut = if ($desktop) { Join-Path $desktop 'Flow 영상 크롬.lnk' } else { $null }
 $chromePath = @((Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe' -ErrorAction SilentlyContinue).'(default)',
