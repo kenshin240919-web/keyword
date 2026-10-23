@@ -3,7 +3,7 @@
 #   - 업데이트.bat (D:\guidejung, 더블클릭)  → 이 스크립트
 #   - run_daily.bat (PC 켤 때·07:50 작업 스케줄러) → 이 스크립트 -Startup
 # 기록: key\logs\update.log
-param([switch]$Startup)
+param([switch]$Startup, [switch]$Rerun)
 
 $ErrorActionPreference = 'Continue'
 $env:GIT_TERMINAL_PROMPT = '0'  # never wait for a password in a hidden window
@@ -127,6 +127,14 @@ foreach ($app in $apps) {
         Push-Location $dir; cmd /c 'python -m pip install -q -r requirements.txt 2>&1' | Out-Null; Pop-Location
     }
     Restart-App $app $dir
+    # This script itself was updated: the rest is done by the new version (PowerShell already loaded this one).
+    if ($app.Dir -eq 'key' -and $changed -contains 'update_all.ps1' -and -not $Rerun) {
+        Say '  업데이트 스크립트가 바뀌어 새 버전으로 이어서 실행합니다.' Cyan
+        $next = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'update_all.ps1'), '-Rerun')
+        if ($Startup) { $next += '-Startup' }
+        & powershell.exe @next
+        exit $LASTEXITCODE
+    }
 }
 
 # Connection guide for Claude (kept in the shot repo) and this script's double-click launcher.
@@ -165,6 +173,7 @@ $flowShortcut = if ($desktop) { Join-Path $desktop 'Flow 영상 크롬.lnk' } el
 $chromePath = @((Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe' -ErrorAction SilentlyContinue).'(default)',
     "$env:ProgramFiles\Google\Chrome\Application\chrome.exe", "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
     "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe") | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+if ($flowShortcut -and -not $chromePath) { Say '크롬(chrome.exe)을 찾지 못해 Flow 크롬 바로가기를 만들지 못했습니다.' Yellow }
 if ($flowShortcut -and $chromePath -and -not (Test-Path $flowShortcut)) {
     try {
         $lnk = (New-Object -ComObject WScript.Shell).CreateShortcut($flowShortcut)
