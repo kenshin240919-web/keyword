@@ -89,7 +89,8 @@ def overview():
             "blog": n, "keyword": (job or {}).get("keyword", ""),
             "write": _write_state(job),
             "video": _video_state(f, d, job),
-            "link": _link_state(job, (blog or {}).get("qrTasks") or [], (blog or {}).get("config", {}).get("qrBlog") or 1),
+            "link": _link_state(job, (blog or {}).get("qrTasks") or [], (blog or {}).get("config", {}).get("qrBlog") or 1,
+                                (blog or {}).get("qrCheck")),
             "naver": _naver_state(st, job),
         })
     site = None
@@ -133,7 +134,7 @@ def _write_state(job):
     return {"icon": "ok", "text": "완료"}
 
 
-def _link_state(job, qr_tasks, qr_blog):
+def _link_state(job, qr_tasks, qr_blog, qr_check=None):
     """Yellow box + thumbnail link: gov post → Naver QR short link (made by blog qr_blog's Chrome)."""
     if not job:
         return {"icon": "wait", "text": "-"}
@@ -144,7 +145,10 @@ def _link_state(job, qr_tasks, qr_blog):
         task = next((t for t in qr_tasks if t.get("ctaKeyword") == job.get("ctaKeyword")), {})
         if task.get("status") == "running":
             return {"icon": "run", "text": f"QR 만드는 중 (블로그 {qr_blog}번 크롬)"}
-        return {"icon": "run", "text": f"QR 차례 기다리는 중 (블로그 {qr_blog}번 크롬)"}
+        at = _iso_to_epoch((qr_check or {}).get("at"))
+        seen = f"마지막 확인 {time.strftime('%H:%M:%S', time.localtime(at))}" if at else "아직 확인 안 함: 그 크롬·확장 확인"
+        return {"icon": "run" if at and time.time() - at < ALIVE_SECONDS else "warn",
+                "text": f"QR 차례 기다리는 중 (블로그 {qr_blog}번 크롬 {seen})"}
     if "site.naver.com" in link or "naver.me" in link:
         return {"icon": "ok", "text": f"QR 링크 {link}"}
     if link:
