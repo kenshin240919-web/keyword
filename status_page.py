@@ -148,13 +148,15 @@ def _naver_state(st, job):
     status = st.get("status")
     if status == "video":
         return {"icon": "wait", "text": "영상 기다리는 중"}
+    if status == "link":
+        return {"icon": "wait", "text": "gov 글 주소 기다리는 중"}
     if status == "pending":
         return {"icon": "wait", "text": "크롬 차례 기다리는 중"}
     if status == "running":
         return {"icon": "run", "text": f"{round(st.get('percent') or 0)}% · {st.get('step') or '저장 중'}"}
     if status == "saved":
         warn = st.get("warning")
-        return {"icon": "warn" if warn else "ok", "text": f"임시저장 완료{' · ' + warn if warn else (' · 영상 포함' if job and job.get('video') else '')}"}
+        return {"icon": "warn" if warn else "ok", "text": f"임시저장 완료{' · ' + warn if warn else (' · 영상 포함' if job and job.get('video') else '') + (' · 링크 포함' if job and job.get('link') else '')}"}
     if status == "error":
         return {"icon": "err", "text": st.get("message") or "오류"}
     return {"icon": "wait", "text": "-"}

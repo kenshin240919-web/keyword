@@ -42,7 +42,7 @@ IDLE_LIMIT = 6 * 3600
 REPORT_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}\.(html|csv)$")
 BASE_URL = f"http://{HOST}:{PORT}"
 # 서버 코드를 바꾸면 올립니다. 예전 버전 서버가 떠 있으면 끄고 새로 켭니다.
-SERVER_VERSION = 9
+SERVER_VERSION = 10
 LOG_PATH = dk.BASE_DIR / "logs" / "report_server.log"
 
 
@@ -113,6 +113,8 @@ def send_to_autopost(url, keyword, image, settings):
         # 예약 실행은 시각이 필요하므로, 키워드 리포트에서 보낼 때는 즉시 실행합니다.
         "mode": settings.get("mode") if settings.get("mode") in ("now", "sequential") else "now",
         "interval": settings.get("interval") or 0,
+        # 다 올리면 A(gov) 글의 짧은 주소를 Blog Automator에 넘겨, 네이버 글의 노란 표·썸네일 링크로 씁니다.
+        "blog_link": True,
     }
     req = urllib.request.Request(f"{url}/api/jobs", data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
                                  method="POST", headers={"Content-Type": "application/json"})
@@ -129,11 +131,24 @@ def send_to_autopost(url, keyword, image, settings):
         raise RuntimeError("자동 포스팅 프로그램(8777)에 연결하지 못했습니다.") from None
 
 
-def send_to_blogauto(keywords, thumbnails=None):
+def skip_blog_link(keyword):
+    """사이트 글이 없으니 링크를 기다리던 네이버 글을 링크 없이 저장하게 합니다."""
+    req = urllib.request.Request(f"{BLOGAUTO_URL}/api/link", method="POST",
+                                 data=json.dumps({"ctaKeyword": keyword, "skip": True}, ensure_ascii=False).encode("utf-8"),
+                                 headers={"Content-Type": "application/json", "X-Blogauto": "1"})
+    try:
+        urllib.request.urlopen(req, timeout=10).close()
+    except (urllib.error.URLError, OSError):
+        pass  # 허브가 90분 뒤 스스로 링크 없이 저장합니다.
+
+
+def send_to_blogauto(keywords, thumbnails=None, wait_link=False):
     """블로그 1~4번에 키워드를 하나씩 넘깁니다. thumbnails = {블로그 번호: 썸네일 경로} (노란 표 바로 아래에 들어감).
     만들어진 작업 수를 돌려줍니다."""
     # ctaKeyword: 네이버 글의 노란 표 문구 "▶{메인 키워드} 바로 확인하기◀"에 들어갈 키워드
     payload = {"keywords": {str(i): k for i, k in enumerate(keywords, 1)}, "ctaKeyword": keywords[0]}
+    if wait_link:  # autopost가 gov 글의 짧은 주소를 넘길 때까지 기다렸다가 노란 표·썸네일에 링크를 겁니다.
+        payload["waitLink"] = True
     if thumbnails:
         payload["thumbnails"] = {str(i): str(p) for i, p in thumbnails.items()}
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -243,7 +258,7 @@ class Handler(BaseHTTPRequestHandler):
                     phrase, button = thumbnail.fallback_copy(keywords[0])
                 thumbs = thumbnail.render(keywords[0], phrase, button, config["thumbnail_out"], config["thumbnail_dir"])
             naver_thumbs = {i: thumbs[f"블로그 {i}번"] for i in range(1, len(keywords) + 1) if f"블로그 {i}번" in thumbs}
-            jobs = send_to_blogauto(keywords, naver_thumbs)
+            jobs = send_to_blogauto(keywords, naver_thumbs, wait_link=use_autopost)
         except RuntimeError as e:
             return self._json(502, {"error": str(e)})
         except (OSError, ValueError) as e:
@@ -264,6 +279,7 @@ class Handler(BaseHTTPRequestHandler):
                     result["archived"] = True
             except RuntimeError as e:
                 result["warning"] = f"네이버 블로그로는 보냈지만, 사이트 자동 포스팅은 실패했습니다: {e}"
+                skip_blog_link(keywords[0])
         self._json(200, result)
 
     def do_GET(self):
