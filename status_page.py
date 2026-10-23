@@ -4,11 +4,13 @@
   - Blog Automator 허브 (37321): 블로그 1~4번 글 작성·임시저장, 블로그 크롬 4개 연결
   - shot (8790): Google Flow 영상 생성, 자막 완성, Flow 크롬 연결
   - autopost (8777): guidejung·gov 사이트 발행
-  - 워드프레스(Local): autopost config.json의 로컬 주소에 접속되는지만 확인 (비밀번호는 읽지 않음)
+  - 워드프레스(Local): autopost config.json의 로컬 주소(포트)에 접속되는지만 확인 (비밀번호는 읽지 않음)
 """
 import json
+import socket
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 import daily_keywords as dk
@@ -28,12 +30,13 @@ def _get(url, headers=None, timeout=3):
 
 
 def _reachable(url):
+    """Whether the site's port takes a connection. Loading the page itself took Local's WordPress
+    longer than the check could wait, so running sites showed as off."""
+    parts = urllib.parse.urlsplit(url)
     try:
-        urllib.request.urlopen(url, timeout=2).close()
+        socket.create_connection((parts.hostname, parts.port or (443 if parts.scheme == "https" else 80)), timeout=2).close()
         return True
-    except urllib.error.HTTPError:
-        return True  # the server answered
-    except (urllib.error.URLError, OSError, ValueError):
+    except (OSError, ValueError):
         return False
 
 
