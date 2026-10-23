@@ -86,7 +86,7 @@ def overview():
         st = (job or {}).get("styles", {}).get(str(n)) or {}
         f, d = flows.get(n) or {}, done.get(n) or {}
         rows.append({
-            "blog": n, "keyword": (job or {}).get("keyword", ""), "actions": _actions(job, st, f),
+            "blog": n, "job": (job or {}).get("id", ""), "keyword": (job or {}).get("keyword", ""), "actions": _actions(job, st, f),
             "write": _write_state(job),
             "video": _video_state(f, d, job),
             "link": _link_state(job, (blog or {}).get("qrTasks") or [], (blog or {}).get("config", {}).get("qrBlog") or 1,
