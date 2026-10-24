@@ -126,11 +126,11 @@ def _write_state(job):
         return {"icon": "wait", "text": "-"}
     status = job.get("status")
     if status == "queued":
-        return {"icon": "wait", "text": "대기"}
+        return {"icon": "warn" if job.get("retryAt") else "wait", "text": job.get("progress") if job.get("retryAt") else "대기"}
     if status == "generating":
         return {"icon": "run", "text": f"작성 중 {round(job.get('percent') or 0)}%"}
     if status == "failed":
-        return {"icon": "err", "text": job.get("error") or "작성 실패"}
+        return {"icon": "err", "text": str(job.get("error") or "작성 실패").split(' {"')[0][:300]}
     return {"icon": "ok", "text": "완료"}
 
 
@@ -141,7 +141,9 @@ def _actions(job, st, flow):
     """Buttons for this blog's row: {column: [{label, act, ...}]} (handled by POST /api/action)."""
     if not job:
         return {}
-    out = {"video": [], "naver": []}
+    out = {"write": [], "video": [], "naver": []}
+    if job.get("status") == "failed":
+        out["write"].append({"label": "다시 쓰기", "act": "rewrite", "job": job["id"]})
     if flow.get("status") == "error" and flow.get("pid"):
         out["video"].append({"label": "영상 다시 만들기", "act": "flow_retry", "pid": flow["pid"]})
     status = st.get("status")
@@ -162,6 +164,9 @@ def act(body):
         _post(f"{SHOT}/api/flow/{_id(body.get('pid'))}/retry", {}, {"X-Shot-Flow": "1"})
         return "영상을 다시 만듭니다 (Flow, 실패하면 1번 더 시도)."
     job = _id(body.get("job"))
+    if kind == "rewrite":
+        _post(f"{BLOGAUTO}/api/jobs/{job}/rewrite", {})
+        return "글을 다시 씁니다."
     if kind == "skip_video":
         _post(f"{BLOGAUTO}/api/jobs/{job}/video", {"skip": True})
         return "영상 없이 임시저장합니다."
@@ -314,7 +319,7 @@ async function refresh() {
       `<span class="chip ${p.ok ? '' : 'off'}">${p.ok ? '●' : '○'} ${esc(p.name)}${p.ok || !p.fix ? '' : `<small>→ ${esc(p.fix)}</small>`}</span>`).join('');
     document.getElementById('title').textContent = d.keyword ? `키워드: ${d.keyword}` : '진행 중인 키워드 없음 (리포트에서 블로그 4곳에 보내기)';
     const rowsHtml = d.rows.map(r =>
-      `<tr><td><b>${r.blog}번</b></td><td>${esc(r.keyword)}</td>${cell(r.write)}${cell(r.video, r.actions.video)}${cell(r.link)}${cell(r.naver, r.actions.naver)}</tr>`).join('');
+      `<tr><td><b>${r.blog}번</b></td><td>${esc(r.keyword)}</td>${cell(r.write, r.actions.write)}${cell(r.video, r.actions.video)}${cell(r.link)}${cell(r.naver, r.actions.naver)}</tr>`).join('');
     if (rowsHtml !== lastRows) { document.getElementById('rows').innerHTML = rowsHtml; lastRows = rowsHtml; }
     const s = d.site;
     const html = !s ? '이 키워드의 사이트 작업 없음' :

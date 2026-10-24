@@ -42,7 +42,7 @@ IDLE_LIMIT = 6 * 3600
 REPORT_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}\.(html|csv)$")
 BASE_URL = f"http://{HOST}:{PORT}"
 # 서버 코드를 바꾸면 올립니다. 예전 버전 서버가 떠 있으면 끄고 새로 켭니다.
-SERVER_VERSION = 15
+SERVER_VERSION = 16
 LOG_PATH = dk.BASE_DIR / "logs" / "report_server.log"
 
 
