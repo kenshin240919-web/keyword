@@ -88,7 +88,11 @@ $null = Wait-Port 37321 30
 # The status page first (starts the report server by itself), then the report (may take a while on the first run of the day).
 Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', 'progress.bat' -WorkingDirectory $PSScriptRoot -WindowStyle Minimized
 Say '[전체 진행 상황] 여는 중' Green
-Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', 'open_report.bat' -WorkingDirectory $PSScriptRoot -WindowStyle Minimized
+# The report waits for the report server the status page just started (both starting it at once could
+# clash), and runs in a normal window: making today's report takes minutes, and an error stays readable.
+$null = Wait-Port 8765 20
+Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', 'open_report.bat' -WorkingDirectory $PSScriptRoot
+Say '[오늘의 리포트] 여는 중 (처음 여는 날은 키워드를 뽑느라 몇 분 걸립니다. 새 창에서 진행 상황이 보입니다)' Green
 
 Say '=== 끝 — 빨간 항목은 진행 상황 페이지에서 확인하세요. 이 창은 10초 뒤 닫힙니다. ===' Cyan
 Start-Sleep 10
