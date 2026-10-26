@@ -751,8 +751,18 @@ def run(today=None, refresh=False):
 
 
 def publish(top, today, candidates, config, period=None):
-    """꼭 쓸 키워드를 고르고, 리포트(HTML·CSV)를 쓰고 화면에 보여 준 뒤 브라우저로 엽니다."""
-    musts = pick_must(top, config["must_n"])
+    """꼭 쓸 키워드를 고르고, 리포트(HTML·CSV)를 쓰고 화면에 보여 준 뒤 브라우저로 엽니다.
+
+    이미 블로그로 보냈거나 '오늘 썼어요'로 기록한 키워드는 꼭 쓸 키워드에서 빼고(전체 추천 목록에는 남김),
+    리포트를 다시 열 때마다 다시 고릅니다."""
+    db = open_db()
+    try:
+        done = {normalize(k) for k in sent_keywords(db) + written_keywords(db)}
+    finally:
+        db.close()
+    for r in top:
+        r["must"] = None
+    musts = pick_must([r for r in top if normalize(r["keyword"]) not in done], config["must_n"])
     html_path = REPORT_DIR / f"{today.isoformat()}.html"
     csv_path = REPORT_DIR / f"{today.isoformat()}.csv"
     write_html(top, html_path, today.isoformat(), {"candidates": candidates, "period": period})
