@@ -177,9 +177,11 @@ def act(body):
         info = next((j for j in (_get(f"{BLOGAUTO}/api/status", {"X-Blogauto": "1"}) or {}).get("jobs", []) if j.get("id") == job), None)
         if not info:
             raise ValueError("작업을 찾을 수 없습니다.")
-        if info.get("siteUrl") and not any(q in str(info.get("link") or "") for q in IS_QR):
+        if info.get("ctaKeyword") and not any(q in str(info.get("link") or "") for q in IS_QR):
             _post(f"{BLOGAUTO}/api/jobs/{job}/relink", {})
-            return "네이버 QR 주소를 먼저 만들고, 글 전체를 다시 임시저장합니다."
+            if info.get("siteUrl"):
+                return "네이버 QR 주소를 먼저 만들고, 글 전체를 다시 임시저장합니다."
+            return "gov 글을 기다립니다. autopost에서 이 키워드를 다시 발행하면 QR 주소를 만들어 다시 임시저장합니다."
         _post(f"{BLOGAUTO}/api/jobs/{job}/styles/{int(info.get('style') or body.get('style'))}", {"status": "retry"})
         return "글 전체를 다시 임시저장합니다."
     raise ValueError("알 수 없는 동작입니다.")
