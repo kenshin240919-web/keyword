@@ -96,7 +96,8 @@ def with_retry(func, *args, tries=3, wait=1.0):
         except ApiError as e:
             if attempt == tries:
                 raise
-            log(f"  재시도 {attempt}/{tries - 1}: {e}")
+            # 네이버 쪽 일시 오류(예: 데이터랩 errorCode 500)는 다시 요청하면 대부분 됩니다. 끝내 실패하면 그 묶음만 건너뜁니다.
+            log(f"  네이버 API 일시 오류 → 다시 요청합니다 ({attempt}/{tries - 1}): {e}")
             time.sleep(wait * attempt)
 
 
