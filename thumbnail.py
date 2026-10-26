@@ -14,6 +14,7 @@
     python thumbnail.py 농업경영체등록 "직장인도 가능?" 확인하기
 """
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -188,8 +189,10 @@ def make_copy(keyword, claude_cmd="claude", timeout=120):
     exe = shutil.which(claude_cmd)
     if exe:
         try:
+            # API 키 환경변수를 빼야 API 요금이 아니라 로그인한 Claude 구독으로 실행됩니다.
+            env = {k: v for k, v in os.environ.items() if k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")}
             p = subprocess.run([exe, "-p", "--output-format", "json"], input=PHRASE_PROMPT.format(keyword=keyword),
-                               capture_output=True, text=True, encoding="utf-8", timeout=timeout)
+                               capture_output=True, text=True, encoding="utf-8", timeout=timeout, env=env)
             text = json.loads(p.stdout).get("result", "")
             data = json.loads(re.search(r"\{.*\}", text, re.S).group(0))
             phrase = str(data.get("phrase", "")).strip()
