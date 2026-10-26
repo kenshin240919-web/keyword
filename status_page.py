@@ -350,7 +350,11 @@ document.getElementById('rows').addEventListener('click', async e => {
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || r.status);
     e.target.textContent = '✓ ' + d.message;
-  } catch (err) { alert('하지 못했습니다: ' + err.message); }
+  } catch (err) {
+    e.target.disabled = false; e.target.textContent = a.label;
+    alert('하지 못했습니다: ' + err.message + (/gov 글 주소가 없습니다|not found|404/.test(err.message)
+      ? '\\n\\nBlog Automator가 예전 버전으로 켜져 있을 수 있습니다. Blog Automator 창을 닫고 실행.bat으로 다시 켠 뒤 눌러 주세요.' : ''));
+  }
   lastRows = ''; setTimeout(refresh, 1500);
 });
 document.getElementById('site').addEventListener('click', async e => {
