@@ -110,7 +110,31 @@ def overview():
     qr = next((j["link"] for j in jobs if "site.naver.com" in str(j.get("link") or "")), "")
     if site is not None and qr:
         site["qr"] = qr
-    return {"programs": programs, "keyword": keyword, "rows": rows, "site": site, "at": time.strftime("%H:%M:%S")}
+    return {"programs": programs, "keyword": keyword, "rows": rows, "site": site,
+            "qr_alerts": _qr_alerts((blog or {}).get("jobs", [])), "at": time.strftime("%H:%M:%S")}
+
+
+QR_ALERT_SINCE = "2026-10-27"  # older posts were made before the QR check existed
+
+
+def _qr_alerts(jobs):
+    """Posts (any recent keyword, not just the current one) whose yellow box got the gov address instead of
+    the Naver QR short link: shown at the top of the page until 다시 시작 gives them a QR link."""
+    out = []
+    for j in jobs:
+        link = str(j.get("link") or "")
+        if (not j.get("ctaKeyword") or j.get("waitLink") or not link or any(q in link for q in IS_QR)
+                or str(j.get("createdAt") or "") < QR_ALERT_SINCE):
+            continue
+        st = (j.get("styles") or {}).get(str(j.get("style"))) or {}
+        when = _iso_to_epoch(st.get("finishedAt") or j.get("createdAt"))
+        out.append({"id": f"{j['id']}|{link}", "blog": j.get("style"), "keyword": j.get("keyword") or j.get("ctaKeyword"),
+                    "when": time.strftime("%m/%d %H:%M", time.localtime(when)) if when else "",
+                    "state": "임시저장됨" if st.get("status") == "saved" else "저장 전",
+                    "note": j.get("linkNote") or "QR 대신 gov 주소가 링크됨", "link": link,
+                    "action": None if st.get("status") == "running" else
+                    {"label": "QR 만들고 다시 시작", "act": "restart", "job": j["id"], "style": j.get("style"), "confirm": True}})
+    return out
 
 
 def _iso_to_epoch(iso):
@@ -296,11 +320,20 @@ STATUS_HTML = """<!doctype html>
   .acts { margin-top:6px; } .act { border:1px solid var(--run); color:var(--run); background:#fff; border-radius:6px; padding:3px 9px; cursor:pointer; font:inherit; font-size:13px; margin:2px 4px 0 0; }
   .post button { border:1px solid var(--line); background:#fff; border-radius:6px; padding:4px 10px; cursor:pointer; font:inherit; font-size:13px; }
   a { color:var(--run); }
+  .alert { border:2px solid var(--warn); background:#fffaeb; }
+  .alert h2 { color:var(--warn); }
+  .qr-item { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:8px 0; border-top:1px solid #fde7c2; }
+  .qr-item:first-child { border-top:0; }
+  .qr-item .url { color:var(--muted); font-size:13px; word-break:break-all; }
+  .qr-item .dismiss { border:1px solid var(--line); background:#fff; border-radius:6px; padding:3px 9px; cursor:pointer; font:inherit; font-size:13px; }
   @media (max-width: 700px) { th:nth-child(2), td:nth-child(2) { display:none; } }
 </style></head>
 <body>
 <header><b>전체 진행 상황</b><span id="at" class="note" style="color:#cbd5e1"></span></header>
 <main>
+  <section id="qrAlerts" class="alert" hidden><h2>⚠️ QR 대신 gov 주소로 들어간 글 <span id="qrCount"></span></h2>
+    <div id="qrList"></div>
+    <p class="note">[QR 만들고 다시 시작]을 누르면 QR 주소를 새로 만들어 그 글을 다시 임시저장합니다 (예전 임시저장 글은 네이버에서 지워 주세요). gov 주소 그대로 둘 글은 [확인함]을 누르면 이 칸에서 사라집니다.</p></section>
   <section><h2>프로그램</h2><div class="chips" id="programs"></div>
     <p class="note">빨간 항목은 꺼져 있거나 연결되지 않은 것입니다. 이름 옆 안내대로 켜 주세요.</p></section>
   <section><h2 id="title">진행 중인 키워드 없음</h2>
@@ -334,13 +367,35 @@ async function refresh() {
        ${s.last ? `<div class="note">${s.state === '완료' ? '마지막 기록' : '지금'}: ${esc(s.last)}</div>` : ''}`;
     // Redraw only when it changed, so a "복사됨" label is not wiped by the 3-second refresh.
     if (html !== lastSite) { document.getElementById('site').innerHTML = html; lastSite = html; }
+    showQrAlerts(d.qr_alerts || []);
   } catch (e) {
     document.getElementById('at').textContent = '상태를 읽지 못했습니다';
   }
 }
-let lastSite = '', lastRows = '';
+let lastSite = '', lastRows = '', lastAlerts = null;
+// Dismissed alerts are remembered in this browser (key: job id + its link, so a new gov link alerts again).
+const seenKey = 'qrAlertsSeen';
+const seen = () => { try { return JSON.parse(localStorage.getItem(seenKey) || '[]'); } catch { return []; } };
+function showQrAlerts(list) {
+  const done = seen(), open = list.filter(a => !done.includes(a.id));
+  document.title = (open.length ? `⚠️ QR 확인 ${open.length}건 · ` : '') + '전체 진행 상황';
+  const html = open.map(a => `<div class="qr-item"><b>${esc(a.when)}</b><span>${esc(a.blog)}번 블로그 · ${esc(a.keyword)}</span>
+      <span class="tag">${esc(a.state)}</span><span class="warn">${esc(a.note)}</span><span class="url">${esc(a.link)}</span>
+      ${a.action ? btns([a.action]) : ''}<button class="dismiss" data-seen="${esc(a.id)}">확인함</button></div>`).join('');
+  if (html === lastAlerts) return;
+  lastAlerts = html;
+  document.getElementById('qrList').innerHTML = html;
+  document.getElementById('qrCount').textContent = open.length ? `(${open.length}건)` : '';
+  document.getElementById('qrAlerts').hidden = !open.length;
+}
+document.getElementById('qrList').addEventListener('click', e => {
+  const id = e.target.dataset.seen;
+  if (!id) return;
+  try { localStorage.setItem(seenKey, JSON.stringify([...seen(), id].slice(-200))); } catch {}
+  lastAlerts = null; refresh();
+});
 // Row buttons: 영상 다시 만들기 / 영상 없이 저장 / 링크 없이 저장 / 다시 시작 — all from this page.
-document.getElementById('rows').addEventListener('click', async e => {
+async function runAct(e) {
   if (!e.target.dataset.act) return;
   const a = JSON.parse(e.target.dataset.act);
   if (a.confirm && !confirm('이 블로그 글을 처음부터 다시 써서 임시저장합니다.\\n이상하게 들어간 예전 임시저장 글은 네이버에서 직접 지워 주세요. 다시 시작할까요?')) return;
@@ -355,8 +410,10 @@ document.getElementById('rows').addEventListener('click', async e => {
     alert('하지 못했습니다: ' + err.message + (/gov 글 주소가 없습니다|not found|404/.test(err.message)
       ? '\\n\\nBlog Automator가 예전 버전으로 켜져 있을 수 있습니다. Blog Automator 창을 닫고 실행.bat으로 다시 켠 뒤 눌러 주세요.' : ''));
   }
-  lastRows = ''; setTimeout(refresh, 1500);
-});
+  lastRows = ''; lastAlerts = null; setTimeout(refresh, 1500);
+}
+document.getElementById('rows').addEventListener('click', runAct);
+document.getElementById('qrList').addEventListener('click', runAct);
 document.getElementById('site').addEventListener('click', async e => {
   const url = e.target.dataset.copy;
   if (!url) return;
