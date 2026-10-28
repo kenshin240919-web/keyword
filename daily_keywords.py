@@ -809,7 +809,8 @@ def publish(top, today, candidates, config, period=None):
 
 # 직접 뽑기 결과 페이지는 매일 리포트와 헷갈리지 않게 제목·문구·색을 바꿉니다.
 CUSTOM_WORDS = (("오늘의 블로그 키워드", "직접 뽑은 키워드"), ("오늘 꼭 쓸 키워드", "꼭 쓸 키워드"),
-                ("작년 시즌", "선택 기간"), ("작년 이 시기", "선택 기간"), ("시즌 변화", "기간 변화"))
+                ("작년 시즌", "선택 기간"), ("작년 이 시기", "선택 기간"), ("시즌 변화", "기간 변화"),
+                (' <a href="/status" target="_blank" style="font-size:15px;font-weight:normal">전체 진행 상황 보기 →</a>', ""))
 CUSTOM_STYLE = ("<style>body{background:#f3f6ff} h1{color:#1e4e8c} h1::before{content:'직접 뽑기 결과';display:block;"
                 "font-size:13px;font-weight:700;color:#fff;background:#2b6cb0;border-radius:6px;padding:3px 10px;width:max-content;margin-bottom:6px}</style>")
 

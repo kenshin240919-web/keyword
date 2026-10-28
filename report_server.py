@@ -35,7 +35,6 @@ try:
 except ImportError:
     thumbnail = None
 import keywordstool
-import custom_page
 import status_page
 
 HOST = "127.0.0.1"
@@ -294,10 +293,6 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"keywords": self._written()})
         if path == "/status":
             return self._send(200, status_page.STATUS_HTML, "text/html; charset=utf-8")
-        if path == "/custom":  # 직접 뽑기: 씨앗 키워드 + 기간 → 따로 저장되는 결과
-            return self._send(200, custom_page.PAGE, "text/html; charset=utf-8")
-        if path == "/api/custom":
-            return self._json(200, custom_page.state())
         if path == "/api/overview":
             return self._json(200, status_page.overview())
         if path == "/api/sent":
@@ -328,7 +323,7 @@ class Handler(BaseHTTPRequestHandler):
     def _do_post(self):
         Handler.last_seen = time.time()
         # 다른 웹사이트가 몰래 기록을 바꾸지 못하도록, 리포트 페이지만 붙이는 헤더를 요구합니다.
-        if self.path not in ("/api/written", "/api/post", "/api/post-plan", "/api/shutdown", "/api/action", "/api/custom") or self.headers.get("X-Report-App") != "1":
+        if self.path not in ("/api/written", "/api/post", "/api/post-plan", "/api/shutdown", "/api/action") or self.headers.get("X-Report-App") != "1":
             return self._json(403, {"error": "forbidden"})
         if self.path == "/api/shutdown":
             self._json(200, {"ok": True})
@@ -337,12 +332,6 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
             if self.path in ("/api/post", "/api/post-plan"):
                 return self._post(body, preview=self.path == "/api/post-plan")
-            if self.path == "/api/custom":
-                try:
-                    custom_page.start(body)
-                    return self._json(200, {"ok": True})
-                except ValueError as e:
-                    return self._json(400, {"error": str(e)})
             if self.path == "/api/action":  # 진행 상황 페이지의 버튼 (다시 시도·영상 없이 저장·다시 시작)
                 try:
                     return self._json(200, {"message": status_page.act(body)})
@@ -455,15 +444,9 @@ def main():
     parser = argparse.ArgumentParser(description="리포트 보기 + '오늘 썼어요' 기록 서버")
     parser.add_argument("--serve", action="store_true", help="서버만 실행")
     parser.add_argument("--status", action="store_true", help="(서버가 꺼져 있으면 켜고) 전체 진행 상황 페이지를 엽니다")
-    parser.add_argument("--custom", action="store_true", help="(서버가 꺼져 있으면 켜고) 키워드 직접 뽑기 페이지를 엽니다")
     args = parser.parse_args()
     if args.serve:
         serve()
-    elif args.custom:
-        if start_background():
-            webbrowser.open(f"{BASE_URL}/custom")
-        else:
-            dk.log("[경고] 리포트 서버를 켜지 못했습니다. logs\\report_server.log를 확인해 주세요.")
     elif args.status:
         if start_background():
             webbrowser.open(f"{BASE_URL}/status")
