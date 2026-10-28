@@ -64,8 +64,14 @@ DEFAULT_CONFIG = {
 TELEGRAM_KEYS = ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID")
 
 
+LOG_SINK = None  # the report server's 직접 뽑기 page reads the progress lines through this
+
+
 def log(msg):
-    print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+    line = f"[{time.strftime('%H:%M:%S')}] {msg}"
+    print(line, flush=True)
+    if LOG_SINK:
+        LOG_SINK(line)
 
 
 def load_config():
@@ -237,8 +243,9 @@ def season_window(today, months_ahead):
     return start, add_months(start, 1)
 
 
-def estimate_season(now_volumes, keys, today, start, end):
-    """{키워드: (작년 시즌 검색수 추정, 작년 시즌 ÷ 최근 30일 비율)}을 돌려줍니다."""
+def estimate_season(now_volumes, keys, today, start, end, per_month=False):
+    """{키워드: (작년 시즌 검색수 추정, 작년 시즌 ÷ 최근 30일 비율)}을 돌려줍니다.
+    per_month: 직접 뽑기처럼 기간 길이가 제각각이면 하루 평균으로 비교해 '한 달 검색수'로 맞춥니다."""
     yesterday = today - timedelta(days=1)
     recent = {(yesterday - timedelta(days=i)).isoformat() for i in range(30)}
     season = {(start + timedelta(days=i)).isoformat() for i in range((end - start).days + 1)}
@@ -254,7 +261,7 @@ def estimate_season(now_volumes, keys, today, start, end):
             now_sum = sum(v for d, v in daily.items() if d in recent)
             past_sum = sum(v for d, v in daily.items() if d in season)
             if now_sum > 0:
-                ratio = past_sum / now_sum
+                ratio = (past_sum / len(season)) / (now_sum / len(recent)) if per_month else past_sum / now_sum
                 result[kw] = (round(now_volumes[kw] * ratio), ratio)
         time.sleep(0.3)
     return result
@@ -522,7 +529,21 @@ if (live) {
 """
 
 
-def write_html(rows, path, today, stats):
+COPY_SCRIPT = """<script>
+document.addEventListener('click', async e => {
+  const kw = e.target.dataset && e.target.dataset.copy;
+  if (!kw) return;
+  try { await navigator.clipboard.writeText(kw); }
+  catch { const t = document.createElement('textarea'); t.value = kw; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); }
+  e.target.textContent = '복사됨 ✓'; setTimeout(() => { e.target.textContent = '키워드 복사'; }, 1500);
+});
+</script>"""
+
+
+def write_html(rows, path, today, stats, buttons=True):
+    """buttons=False (직접 뽑기): 블로그 4곳 보내기·오늘 썼어요 없이 '키워드 복사'만 — 다른 블로그용이라 매일 흐름과 섞지 않음."""
+    acts = (lambda r: _post_button(r) + _write_button(r["keyword"])) if buttons else \
+        (lambda r: f"<button class='w' data-copy='{html.escape(r['keyword'], quote=True)}'>키워드 복사</button>")
     period = stats.get("period")
     period_text = f"({period[0]} ~ {period[1]})" if period else ""
     musts = [r for r in rows if r.get("must")]
@@ -533,7 +554,7 @@ def write_html(rows, path, today, stats):
         f"지금 대비 {(r['growth'] - 1) * 100:+.0f}% · "
         f"<a href='{html.escape(blog_search_url(r['keyword']))}' target='_blank'>상위 글 보기</a></div>"
         f"{_details_html(r)}</div>"
-        f"<div class='btns'>{_post_button(r)}{_write_button(r['keyword'])}</div></div>"
+        f"<div class='btns'>{acts(r)}</div></div>"
         for i, r in enumerate(musts, 1)
     )
     body = "\n".join(
@@ -545,7 +566,7 @@ def write_html(rows, path, today, stats):
         f"<td><b>{r['score']}</b></td><td>{html.escape(str(r['comp']))}</td>"
         f"<td class='why'>{html.escape(r['reason'])}</td>"
         f"<td><a href='{html.escape(blog_search_url(r['keyword']))}' target='_blank'>열기</a></td>"
-        f"<td><div class='btns'>{_post_button(r)}{_write_button(r['keyword'])}</div></td></tr>"
+        f"<td><div class='btns'>{acts(r)}</div></td></tr>"
         for i, r in enumerate(rows, 1)
     )
     path.write_text(f"""<!doctype html>
@@ -595,11 +616,11 @@ button.w:disabled {{ border-color: #bbb; color: #999; background: #f5f5f5; curso
 {cards}
 </div>
 <h2 style="font-size:18px">전체 추천 {len(rows)}개 <span style="font-weight:400;color:#888;font-size:14px">(★ = 꼭 쓸 키워드)</span></h2>
-<table><tr><th>순위</th><th class="kw">키워드</th><th>작년 시즌<br>검색수(추정)</th><th>현재<br>월 검색수</th><th>블로그<br>문서 수</th><th>카페<br>글 수</th><th>기회 지수</th><th>시즌 변화</th><th>점수</th><th>광고 경쟁도</th><th class="why">추천 이유</th><th>블로그 검색</th><th>포스팅 · 작성 기록</th></tr>
+<table><tr><th>순위</th><th class="kw">키워드</th><th>작년 시즌<br>검색수(추정)</th><th>현재<br>월 검색수</th><th>블로그<br>문서 수</th><th>카페<br>글 수</th><th>기회 지수</th><th>시즌 변화</th><th>점수</th><th>광고 경쟁도</th><th class="why">추천 이유</th><th>블로그 검색</th><th>{'포스팅 · 작성 기록' if buttons else '복사'}</th></tr>
 {body}
 </table>
-<div id="notice" class="notice" hidden>'오늘 썼어요'·'보내기' 버튼을 쓰려면 key 폴더의 <b>open_report.bat</b>을 더블클릭해 리포트를 여세요.</div>
-""" + REPORT_SCRIPT + "</body></html>\n", encoding="utf-8")
+""" + ("""<div id="notice" class="notice" hidden>'오늘 썼어요'·'보내기' 버튼을 쓰려면 key 폴더의 <b>open_report.bat</b>을 더블클릭해 리포트를 여세요.</div>
+""" + REPORT_SCRIPT if buttons else COPY_SCRIPT) + "</body></html>\n", encoding="utf-8")
 
 
 def send_telegram(rows, today, keys):
@@ -673,8 +694,9 @@ def unmark_written(words):
         print(f"작성 기록에 없는 키워드입니다: {', '.join(missing)}")
 
 
-def run(today=None, refresh=False, seeds=None):
-    """seeds: 직접 뽑기 — 이 씨앗으로 따로 뽑아 reports\직접뽑기\에 저장합니다. 매일 리포트·기록(history.db)은 그대로 둡니다."""
+def run(today=None, refresh=False, seeds=None, period=None, open_browser=True):
+    """seeds: 직접 뽑기 — 이 씨앗으로 따로 뽑아 reports\직접뽑기\에 저장합니다. 매일 리포트·기록(history.db)은 그대로 둡니다.
+    period: 직접 뽑기의 기준 기간 (시작일, 종료일 date). 없으면 매일 리포트와 같은 '작년 시즌'."""
     today = today or date.today()
     config = load_config()
     custom = bool(seeds)
@@ -696,14 +718,14 @@ def run(today=None, refresh=False, seeds=None):
     keys = keywordstool.load_keys(required=keywordstool.REQUIRED_KEYS + naver_api.OPENAPI_KEYS)
     db = open_db()
 
-    start, end = season_window(today, config["season_months_ahead"])
+    start, end = period if custom and period else season_window(today, config["season_months_ahead"])
     period = [start.isoformat(), end.isoformat()]
 
     log(f"1/5 연관 키워드 수집 (씨앗 {len(seeds)}개)")
     found = collect_candidates(seeds, keys)
     banned = [b for b in config["banned_words"] if b]
-    # 직접 뽑기는 이미 쓴 키워드만 빼고, 최근 추천했던 키워드도 보여 줍니다.
-    skip = set(written_keywords(db)) if custom else excluded_keywords(db, today, config["exclude_recent_days"])
+    # 직접 뽑기는 다른 블로그용이라 매일 리포트의 추천·작성 기록과 상관없이 모두 보여 줍니다.
+    skip = set() if custom else excluded_keywords(db, today, config["exclude_recent_days"])
     scan = sorted(
         ((kw, vol) for kw, (vol, _) in found.items()
          if vol >= config["min_now_volume"] and kw not in skip and not any(b in kw for b in banned)),
@@ -711,7 +733,7 @@ def run(today=None, refresh=False, seeds=None):
     log(f"  연관 키워드 {len(found)}개 → 추정 대상 {len(scan)}개")
 
     log(f"2/5 작년 시즌({period[0]} ~ {period[1]}) 검색수 추정 (데이터랩)")
-    season = estimate_season(dict(scan), keys, today, start, end)
+    season = estimate_season(dict(scan), keys, today, start, end, per_month=custom)
     pool = sorted(
         (kw for kw, (est, _) in season.items() if config["min_volume"] <= est <= config["max_volume"]),
         key=lambda kw: season[kw][0], reverse=True)[:config["candidate_limit"]]
@@ -738,7 +760,7 @@ def run(today=None, refresh=False, seeds=None):
 
     log("5/5 리포트 저장")
     if custom:
-        return publish_custom(top, today, len(rows), config, period, seeds)
+        return publish_custom(top, today, len(rows), config, period, seeds, open_browser)
     REPORT_DIR.mkdir(exist_ok=True)
     result_path.write_text(json.dumps({"top": top, "candidates": len(rows), "period": period},
                                       ensure_ascii=False, indent=1),
@@ -785,14 +807,25 @@ def publish(top, today, candidates, config, period=None):
         report_server.open_report(html_path.name)
 
 
-def publish_custom(top, today, candidates, config, period, seeds):
-    """직접 뽑기 결과: reports\직접뽑기\날짜_시각_첫씨앗.html·.csv (매일 리포트와 따로)."""
+# 직접 뽑기 결과 페이지는 매일 리포트와 헷갈리지 않게 제목·문구·색을 바꿉니다.
+CUSTOM_WORDS = (("오늘의 블로그 키워드", "직접 뽑은 키워드"), ("오늘 꼭 쓸 키워드", "꼭 쓸 키워드"),
+                ("작년 시즌", "선택 기간"), ("작년 이 시기", "선택 기간"), ("시즌 변화", "기간 변화"))
+CUSTOM_STYLE = ("<style>body{background:#f3f6ff} h1{color:#1e4e8c} h1::before{content:'직접 뽑기 결과';display:block;"
+                "font-size:13px;font-weight:700;color:#fff;background:#2b6cb0;border-radius:6px;padding:3px 10px;width:max-content;margin-bottom:6px}</style>")
+
+
+def publish_custom(top, today, candidates, config, period, seeds, open_browser=True):
+    """직접 뽑기 결과: reports\직접뽑기\날짜_시각_첫씨앗.html·.csv (매일 리포트와 따로). 파일 이름(확장자 없이)을 돌려줍니다."""
     out = REPORT_DIR / "직접뽑기"
     out.mkdir(parents=True, exist_ok=True)
     name = f"{datetime.now():%Y-%m-%d_%H%M}_{re.sub(r'[^0-9A-Za-z가-힣]+', '', seeds[0])[:20] or '키워드'}"
     musts = pick_must(top, config["must_n"])
-    write_html(top, out / f"{name}.html", f"{today.isoformat()} · 직접 뽑기 ({', '.join(seeds)})",
-               {"candidates": candidates, "period": period})
+    write_html(top, out / f"{name}.html", f"{today.isoformat()} · 씨앗: {', '.join(seeds)}",
+               {"candidates": candidates, "period": period}, buttons=False)
+    page = (out / f"{name}.html").read_text(encoding="utf-8")
+    for old, new in CUSTOM_WORDS:
+        page = page.replace(old, new)
+    (out / f"{name}.html").write_text(page.replace("</head>", CUSTOM_STYLE + "</head>", 1), encoding="utf-8")
     write_csv(top, out / f"{name}.csv")
     print(f"\n★ 꼭 쓸 키워드 {len(musts)}개")
     for r in musts:
@@ -800,9 +833,10 @@ def publish_custom(top, today, candidates, config, period, seeds):
     print(f"\n추천 키워드 {len(top)}개")
     print_rows(top)
     print(f"\n리포트: {out / (name + '.html')}\nCSV:    {out / (name + '.csv')}")
-    if config["open_report"]:  # through the report server, so its 보내기·썼어요 buttons work
+    if open_browser and config["open_report"]:  # through the report server, so its 보내기·썼어요 buttons work
         import report_server
         report_server.open_report(f"직접뽑기/{name}.html")
+    return name
 
 
 def main():
