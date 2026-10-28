@@ -22,6 +22,7 @@ TELEGRAM_CHAT_ID=...
 | 리포트의 **블로그 4곳에 보내기** | 메인 키워드 → 1번 블로그, 세부 키워드 3개 → 2~4번 블로그로 Blog Automator에 글 작성·임시저장 요청. 동시에 자동 포스팅 프로그램(8777)에 메인 키워드 + 이미지로 guidejung·gov 발행 요청. 두 프로그램이 모두 켜져 있어야 함 |
 | `open_report.bat` 더블클릭 | 오늘 리포트 열기 (없으면 먼저 만듦) — **'오늘 썼어요' 버튼으로 작성 기록** |
 | `python daily_keywords.py --refresh` | 오늘 결과를 버리고 새로 뽑기 (같은 날 다시 실행하면 첫 결과 유지) |
+| `직접뽑기.bat` 더블클릭 (또는 `python daily_keywords.py --seeds "청년지원금, 전세대출"`) | **직접 뽑기**: 원하는 씨앗 키워드로 추천 키워드를 따로 뽑음. 결과는 `reports\직접뽑기\날짜_시각_첫씨앗.html·.csv`. 매일 리포트·seeds.txt·추천 기록은 그대로 (이미 쓴 키워드만 뺌). 리포트의 보내기·썼어요 버튼도 동작 |
 | `python daily_keywords.py --written 궁합` | 이미 쓴 키워드로 기록 (이후 추천 제외) |
 | `python daily_keywords.py --unwritten 궁합` | 잘못 기록한 키워드 취소 |
 | `setup_task.bat` 더블클릭 | 자동 실행 등록: 로그인할 때 + 매일 07:50 (하루 1번만). 실행할 때마다 먼저 4개 프로그램을 업데이트 |

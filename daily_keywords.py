@@ -20,12 +20,13 @@ import csv
 import html
 import json
 import os
+import re
 import sqlite3
 import sys
 import time
 import urllib.parse
 import urllib.request
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import keywordstool
@@ -672,11 +673,13 @@ def unmark_written(words):
         print(f"작성 기록에 없는 키워드입니다: {', '.join(missing)}")
 
 
-def run(today=None, refresh=False):
+def run(today=None, refresh=False, seeds=None):
+    """seeds: 직접 뽑기 — 이 씨앗으로 따로 뽑아 reports\직접뽑기\에 저장합니다. 매일 리포트·기록(history.db)은 그대로 둡니다."""
     today = today or date.today()
     config = load_config()
+    custom = bool(seeds)
     result_path = REPORT_DIR / f"{today.isoformat()}.json"
-    if result_path.exists() and not refresh:
+    if result_path.exists() and not refresh and not custom:
         # 같은 날 다시 실행하면 아침 첫 결과를 그대로 보여 줍니다 (API를 다시 부르지 않음).
         saved = json.loads(result_path.read_text(encoding="utf-8"))
         log("오늘 첫 결과를 그대로 보여 줍니다. 새로 뽑으려면 --refresh 를 붙여 실행하세요.")
@@ -689,7 +692,7 @@ def run(today=None, refresh=False):
         publish(saved["top"], today, saved["candidates"], config, saved.get("period"))
         return
 
-    seeds = load_seeds()
+    seeds = seeds or load_seeds()
     keys = keywordstool.load_keys(required=keywordstool.REQUIRED_KEYS + naver_api.OPENAPI_KEYS)
     db = open_db()
 
@@ -699,7 +702,8 @@ def run(today=None, refresh=False):
     log(f"1/5 연관 키워드 수집 (씨앗 {len(seeds)}개)")
     found = collect_candidates(seeds, keys)
     banned = [b for b in config["banned_words"] if b]
-    skip = excluded_keywords(db, today, config["exclude_recent_days"])
+    # 직접 뽑기는 이미 쓴 키워드만 빼고, 최근 추천했던 키워드도 보여 줍니다.
+    skip = set(written_keywords(db)) if custom else excluded_keywords(db, today, config["exclude_recent_days"])
     scan = sorted(
         ((kw, vol) for kw, (vol, _) in found.items()
          if vol >= config["min_now_volume"] and kw not in skip and not any(b in kw for b in banned)),
@@ -733,6 +737,8 @@ def run(today=None, refresh=False):
     add_details(top, found, seeds, keys)
 
     log("5/5 리포트 저장")
+    if custom:
+        return publish_custom(top, today, len(rows), config, period, seeds)
     REPORT_DIR.mkdir(exist_ok=True)
     result_path.write_text(json.dumps({"top": top, "candidates": len(rows), "period": period},
                                       ensure_ascii=False, indent=1),
@@ -779,6 +785,26 @@ def publish(top, today, candidates, config, period=None):
         report_server.open_report(html_path.name)
 
 
+def publish_custom(top, today, candidates, config, period, seeds):
+    """직접 뽑기 결과: reports\직접뽑기\날짜_시각_첫씨앗.html·.csv (매일 리포트와 따로)."""
+    out = REPORT_DIR / "직접뽑기"
+    out.mkdir(parents=True, exist_ok=True)
+    name = f"{datetime.now():%Y-%m-%d_%H%M}_{re.sub(r'[^0-9A-Za-z가-힣]+', '', seeds[0])[:20] or '키워드'}"
+    musts = pick_must(top, config["must_n"])
+    write_html(top, out / f"{name}.html", f"{today.isoformat()} · 직접 뽑기 ({', '.join(seeds)})",
+               {"candidates": candidates, "period": period})
+    write_csv(top, out / f"{name}.csv")
+    print(f"\n★ 꼭 쓸 키워드 {len(musts)}개")
+    for r in musts:
+        print(f"  ★ {r['keyword']}  ({r['must']})")
+    print(f"\n추천 키워드 {len(top)}개")
+    print_rows(top)
+    print(f"\n리포트: {out / (name + '.html')}\nCSV:    {out / (name + '.csv')}")
+    if config["open_report"]:  # through the report server, so its 보내기·썼어요 buttons work
+        import report_server
+        report_server.open_report(f"직접뽑기/{name}.html")
+
+
 def main():
     keywordstool.setup_console()
     parser = argparse.ArgumentParser(description="매일 블로그 추천 키워드 리포트")
@@ -786,7 +812,14 @@ def main():
     parser.add_argument("--unwritten", nargs="+", metavar="키워드", help="잘못 기록한 작성 키워드 취소")
     parser.add_argument("--skip-if-done", action="store_true", help="오늘 리포트가 이미 있으면 실행하지 않음")
     parser.add_argument("--refresh", action="store_true", help="오늘 결과를 버리고 새로 뽑기")
+    parser.add_argument("--seeds", nargs="*", metavar="씨앗", help="직접 뽑기: 이 씨앗 키워드로 따로 뽑기 (쉼표로 구분, 비우면 물어봄)")
     args = parser.parse_args()
+    if args.seeds is not None:
+        text = " ".join(args.seeds) or input("씨앗 키워드를 쉼표로 구분해 입력하세요 (예: 청년지원금, 전세대출): ")
+        seeds = [s.strip() for s in re.split(r"[,\n]", text) if s.strip()]
+        if not seeds:
+            sys.exit("씨앗 키워드가 없습니다.")
+        return run(seeds=seeds)
     if args.written:
         mark_written(args.written)
     elif args.unwritten:

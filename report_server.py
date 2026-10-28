@@ -22,6 +22,7 @@ import threading
 import time
 import traceback
 import urllib.error
+import urllib.parse
 import urllib.request
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -40,9 +41,10 @@ HOST = "127.0.0.1"
 PORT = 8765
 IDLE_LIMIT = 6 * 3600
 REPORT_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}\.(html|csv)$")
+CUSTOM_NAME = re.compile(r"^직접뽑기/\d{4}-\d{2}-\d{2}_\d{4}_[0-9A-Za-z가-힣]+\.(html|csv)$")  # daily_keywords.py --seeds
 BASE_URL = f"http://{HOST}:{PORT}"
 # 서버 코드를 바꾸면 올립니다. 예전 버전 서버가 떠 있으면 끄고 새로 켭니다.
-SERVER_VERSION = 18
+SERVER_VERSION = 19
 LOG_PATH = dk.BASE_DIR / "logs" / "report_server.log"
 
 
@@ -301,9 +303,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, "<meta charset='utf-8'>아직 리포트가 없습니다.", "text/html; charset=utf-8")
             return self._send(302, b"", extra={"Location": f"/reports/{name}"})
         if path.startswith("/reports/"):
-            name = path[len("/reports/"):]
+            name = urllib.parse.unquote(path[len("/reports/"):])
             file = dk.REPORT_DIR / name
-            if REPORT_NAME.match(name) and file.is_file():
+            if (REPORT_NAME.match(name) or CUSTOM_NAME.match(name)) and file.is_file():
                 ctype = "text/html; charset=utf-8" if name.endswith(".html") else "text/csv; charset=utf-8"
                 return self._send(200, file.read_bytes(), ctype)
         self._json(404, {"error": "not found"})
@@ -431,7 +433,7 @@ def open_report(name=None):
     """리포트를 엽니다. 서버를 켤 수 없으면 기록 버튼 없이 파일로 엽니다."""
     name = name or latest_report()
     if start_background():
-        webbrowser.open(f"{BASE_URL}/reports/{name}" if name else BASE_URL)
+        webbrowser.open(f"{BASE_URL}/reports/{urllib.parse.quote(name)}" if name else BASE_URL)
     elif name:
         dk.log("[경고] 기록 서버를 켜지 못해 리포트를 파일로 엽니다 ('오늘 썼어요' 버튼은 동작하지 않음).")
         webbrowser.open((dk.REPORT_DIR / name).as_uri())
