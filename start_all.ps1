@@ -28,6 +28,14 @@ else {
     if ($local) { Start-Process -FilePath $local; Say '[Local] 켰습니다. 사이트가 멈춰 있으면 Local 화면에서 Start를 눌러 주세요.' Green }
     else { Say '[Local] 프로그램을 찾지 못했습니다. 직접 켜 주세요.' Yellow }
 }
+# Local 사이트 3개를 새로 시작 (오래 켜 두면 응답이 멈춰 배포가 걸리던 문제 예방, 2026-10-28).
+# move\local_sites.py가 있을 때만 (PC에서 만든 도우미: Local이 켜질 때까지 기다린 뒤 사이트를 Stop → Start).
+$sites = Join-Path $base 'move\local_sites.py'
+if (Test-Path $sites) {
+    Say '[Local] 사이트 3개를 다시 시작하는 중 (1분 정도)...'
+    & python $sites restart-all
+    if ($LASTEXITCODE -eq 0) { Say '[Local] 사이트 다시 시작 완료' Green } else { Say '[Local] 사이트 다시 시작 실패: Local 화면에서 Start를 눌러 주세요.' Yellow }
+}
 
 # 2. Blog Automator (37321)
 if (Test-Port 37321) { Say '[Blog Automator] 이미 켜져 있음' }
