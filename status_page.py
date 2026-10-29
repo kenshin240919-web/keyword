@@ -104,7 +104,9 @@ def overview():
         if keyword and j.get("keyword") == keyword:
             result = j.get("result") or {}
             site = {"state": j.get("state"),
-                    "links": [{"site": site_name(v.get("public")), "title": v.get("title", k), "url": v.get("public")}
+                    # A post's address exists as soon as it is written, but opens only after its site's deploy.
+                    "links": [{"site": site_name(v.get("public")), "title": v.get("title", k), "url": v.get("public"),
+                               "live": any(f"{str(v.get('public')).split('//')[-1].split('/')[0]} 배포 완료" in line for line in j.get("log") or [])}
                               for k, v in sorted(result.items()) if isinstance(v, dict) and v.get("public")],
                     "last": (j.get("log") or [""])[-1] if j.get("log") else ""}
     qr = next((j["link"] for j in jobs if "site.naver.com" in str(j.get("link") or "")), "")
@@ -360,7 +362,7 @@ async function refresh() {
     const html = !s ? '이 키워드의 사이트 작업 없음' :
       `<div class="${s.state === '완료' ? 'ok' : s.state === '실패' ? 'err' : 'run'}">${esc(s.state)}</div>
        ${s.links.map(l => `<div class="post"><span class="tag">${esc(l.site || '사이트')}</span>
-         <a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.title)}</a>
+         <a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.title)}</a>${l.live ? '' : ' <span class="tag" style="background:#fff4e5;color:#b54708">배포 전 · 아직 안 열림</span>'}
          <span class="url">${esc(l.url)}</span><button data-copy="${esc(l.url)}">주소 복사</button></div>`).join('')}
        ${s.qr ? `<div class="post"><span class="tag">네이버 QR</span><span>노란 표·썸네일 링크</span>
          <span class="url">${esc(s.qr)}</span><button data-copy="${esc(s.qr)}">주소 복사</button></div>` : ''}
