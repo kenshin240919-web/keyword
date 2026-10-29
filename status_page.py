@@ -103,7 +103,11 @@ def overview():
     for j in (auto or {}).get("jobs", []):
         if keyword and j.get("keyword") == keyword:
             result = j.get("result") or {}
-            site = {"state": j.get("state"),
+            links_live = [any(f"{str(v.get('public')).split('//')[-1].split('/')[0]} 배포 완료" in line for line in j.get("log") or [])
+                          for v in result.values() if isinstance(v, dict) and v.get("public")]
+            site = {"state": j.get("state"), "job": j.get("id"),
+                    # 배포 다시: the run ended but a written post is not live (failed or stopped deploy)
+                    "redeploy": j.get("state") in ("실패", "중단", "완료") and bool(links_live) and not all(links_live),
                     # A post's address exists as soon as it is written, but opens only after its site's deploy.
                     "links": [{"site": site_name(v.get("public")), "title": v.get("title", k), "url": v.get("public"),
                                "live": any(f"{str(v.get('public')).split('//')[-1].split('/')[0]} 배포 완료" in line for line in j.get("log") or [])}
@@ -186,6 +190,9 @@ def _actions(job, st, flow):
 def act(body):
     """Runs a status-page button: asks shot or Blog Automator to do it. Returns a short message."""
     kind = body.get("act")
+    if kind == "redeploy":  # 사이트 발행 칸: deploy a written run again (autopost), gov first
+        _post(f"{AUTOPOST}/api/jobs/redeploy", {"id": _id(body.get("id"))})
+        return "사이트 배포를 다시 합니다 (gov 먼저, 끝나면 네이버 글에 주소 전달)."
     if kind == "flow_retry":
         _post(f"{SHOT}/api/flow/{_id(body.get('pid'))}/retry", {}, {"X-Shot-Flow": "1"})
         return "영상을 다시 만듭니다 (Flow, 실패하면 1번 더 시도)."
@@ -244,6 +251,9 @@ def _link_state(job, qr_tasks, qr_blog, qr_check=None):
     link, note = str(job.get("link") or ""), job.get("linkNote") or ""
     if job.get("waitLink"):
         if not job.get("siteUrl"):
+            waited = (time.time() - (_iso_to_epoch(job.get("linkWaitSince") or job.get("createdAt")) or time.time())) / 60
+            if waited > 40:  # posts never save without the link on their own: say what to do
+                return {"icon": "warn", "text": f"gov 글 주소를 {waited:.0f}분째 기다리는 중 → 아래 사이트 발행 칸 확인 ([배포 다시]) 또는 [링크 없이 저장]"}
             return {"icon": "wait", "text": "gov 글 발행 기다리는 중"}
         task = next((t for t in qr_tasks if t.get("ctaKeyword") == job.get("ctaKeyword")), {})
         if task.get("status") == "running":
@@ -366,7 +376,8 @@ async function refresh() {
          <span class="url">${esc(l.url)}</span><button data-copy="${esc(l.url)}">주소 복사</button></div>`).join('')}
        ${s.qr ? `<div class="post"><span class="tag">네이버 QR</span><span>노란 표·썸네일 링크</span>
          <span class="url">${esc(s.qr)}</span><button data-copy="${esc(s.qr)}">주소 복사</button></div>` : ''}
-       ${s.last ? `<div class="note">${s.state === '완료' ? '마지막 기록' : '지금'}: ${esc(s.last)}</div>` : ''}`;
+       ${s.last ? `<div class="note">${s.state === '완료' ? '마지막 기록' : '지금'}: ${esc(s.last)}</div>` : ''}
+       ${s.redeploy ? `<div class="acts">${btns([{ label: '배포 다시', act: 'redeploy', id: s.job }])} <span class="note">글은 써졌는데 사이트에 아직 안 올라갔습니다. 다시 쓰지 않고 배포만 다시 합니다.</span></div>` : ''}`;
     // Redraw only when it changed, so a "복사됨" label is not wiped by the 3-second refresh.
     if (html !== lastSite) { document.getElementById('site').innerHTML = html; lastSite = html; }
     showQrAlerts(d.qr_alerts || []);
@@ -416,6 +427,7 @@ async function runAct(e) {
 }
 document.getElementById('rows').addEventListener('click', runAct);
 document.getElementById('qrList').addEventListener('click', runAct);
+document.getElementById('site').addEventListener('click', runAct);
 document.getElementById('site').addEventListener('click', async e => {
   const url = e.target.dataset.copy;
   if (!url) return;
