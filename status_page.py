@@ -377,6 +377,7 @@ async function refresh() {
        ${s.qr ? `<div class="post"><span class="tag">네이버 QR</span><span>노란 표·썸네일 링크</span>
          <span class="url">${esc(s.qr)}</span><button data-copy="${esc(s.qr)}">주소 복사</button></div>` : ''}
        ${s.last ? `<div class="note">${s.state === '완료' ? '마지막 기록' : '지금'}: ${esc(s.last)}</div>` : ''}
+       ${s.state === '실패' && !s.links.length ? `<div class="err">글 작성부터 실패했습니다 → autopost 화면에서 이 키워드를 다시 실행해 주세요 (네이버 글은 gov 주소를 계속 기다립니다).</div>` : ''}
        ${s.redeploy ? `<div class="acts">${btns([{ label: '배포 다시', act: 'redeploy', id: s.job }])} <span class="note">글은 써졌는데 사이트에 아직 안 올라갔습니다. 다시 쓰지 않고 배포만 다시 합니다.</span></div>` : ''}`;
     // Redraw only when it changed, so a "복사됨" label is not wiped by the 3-second refresh.
     if (html !== lastSite) { document.getElementById('site').innerHTML = html; lastSite = html; }
