@@ -377,7 +377,7 @@ const cell = (s, acts) => `<td class="${s.icon}">${ICON[s.icon] || ''} ${esc(s.t
 async function refresh() {
   try {
     const d = await (await fetch('/api/overview', { cache: 'no-store' })).json();
-    document.getElementById('at').textContent = d.at + ' 기준';
+    document.getElementById('at').textContent = `${d.at} 기준 · 프로그램 v${d.version || '?'}`;
     document.getElementById('programs').innerHTML = d.programs.map(p =>
       `<span class="chip ${p.ok ? '' : 'off'}">${p.ok ? '●' : '○'} ${esc(p.name)}${p.ok || !p.fix ? '' : `<small>→ ${esc(p.fix)}</small>`}</span>`).join('');
     document.getElementById('title').textContent = d.keyword ? `키워드: ${d.keyword}` : '진행 중인 키워드 없음 (리포트에서 블로그 4곳에 보내기)';
