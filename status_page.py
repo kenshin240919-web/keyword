@@ -105,7 +105,10 @@ def overview():
             result = j.get("result") or {}
             links_live = [any(f"{str(v.get('public')).split('//')[-1].split('/')[0]} 배포 완료" in line for line in j.get("log") or [])
                           for v in result.values() if isinstance(v, dict) and v.get("public")]
+            errors = [line for line in j.get("log") or [] if "오류:" in line]
             site = {"state": j.get("state"), "job": j.get("id"),
+                    # why it failed, in words: the run's error line without the time
+                    "error": _explain(errors[-1].split("오류:", 1)[1].strip()[:300]) if errors and j.get("state") == "실패" else "",
                     # 배포 다시: the run ended but a written post is not live (failed or stopped deploy)
                     "redeploy": j.get("state") in ("실패", "중단", "완료") and bool(links_live) and not all(links_live),
                     # A post's address exists as soon as it is written, but opens only after its site's deploy.
@@ -190,6 +193,9 @@ def _actions(job, st, flow):
 def act(body):
     """Runs a status-page button: asks shot or Blog Automator to do it. Returns a short message."""
     kind = body.get("act")
+    if kind == "rerun":  # 사이트 발행 칸: the site run failed before writing → write and publish again (autopost)
+        _post(f"{AUTOPOST}/api/jobs/rerun", {"id": _id(body.get("id"))})
+        return "사이트 글을 다시 씁니다 (10~20분, 끝나면 네이버 글에 주소 전달)."
     if kind == "redeploy":  # 사이트 발행 칸: deploy a written run again (autopost), gov first
         _post(f"{AUTOPOST}/api/jobs/redeploy", {"id": _id(body.get("id"))})
         return "사이트 배포를 다시 합니다 (gov 먼저, 끝나면 네이버 글에 주소 전달)."
@@ -287,6 +293,16 @@ def _video_state(flow, done, job):
     return {"icon": "wait", "text": "-"}
 
 
+def _explain(error):
+    """The raw error plus what it means for the usual causes."""
+    hints = [(("limit", "한도", "usage"), "Claude 구독 사용량 한도에 걸렸습니다. 한도가 풀리는 시간 뒤에 다시 쓰기를 눌러 주세요"),
+             (("login", "로그인", "auth"), "Claude Code 로그인이 필요합니다. 명령 프롬프트에서 claude → /login 후 다시 쓰기"),
+             (("529", "overloaded", "Overloaded"), "Claude 서버가 일시적으로 바쁩니다. 몇 분 뒤 다시 쓰기"),
+             (("Connection", "localhost", "10004", "10016", "Local"), "Local 워드프레스 사이트가 꺼져 있거나 응답하지 않습니다. Local에서 Start 후 다시 쓰기")]
+    hint = next((text for keys, text in hints if any(k in error for k in keys)), "")
+    return f"{error} → {hint}" if hint else error
+
+
 def _naver_state(st, job):
     status = st.get("status")
     if status == "video":
@@ -377,7 +393,8 @@ async function refresh() {
        ${s.qr ? `<div class="post"><span class="tag">네이버 QR</span><span>노란 표·썸네일 링크</span>
          <span class="url">${esc(s.qr)}</span><button data-copy="${esc(s.qr)}">주소 복사</button></div>` : ''}
        ${s.last ? `<div class="note">${s.state === '완료' ? '마지막 기록' : '지금'}: ${esc(s.last)}</div>` : ''}
-       ${s.state === '실패' && !s.links.length ? `<div class="err">글 작성부터 실패했습니다 → autopost 화면에서 이 키워드를 다시 실행해 주세요 (네이버 글은 gov 주소를 계속 기다립니다).</div>` : ''}
+       ${s.error ? `<div class="err">실패 이유: ${esc(s.error)}</div>` : ''}
+       ${s.state === '실패' && !s.links.length ? `<div class="acts">${btns([{ label: '사이트 글 다시 쓰기', act: 'rerun', id: s.job }])} <span class="note">같은 키워드·설정으로 gov·guidejung 글을 처음부터 다시 쓰고 발행합니다. 네이버 글 4편은 그 주소를 기다렸다가 이어서 진행합니다.</span></div>` : ''}
        ${s.redeploy ? `<div class="acts">${btns([{ label: '배포 다시', act: 'redeploy', id: s.job }])} <span class="note">글은 써졌는데 사이트에 아직 안 올라갔습니다. 다시 쓰지 않고 배포만 다시 합니다.</span></div>` : ''}`;
     // Redraw only when it changed, so a "복사됨" label is not wiped by the 3-second refresh.
     if (html !== lastSite) { document.getElementById('site').innerHTML = html; lastSite = html; }
