@@ -31,6 +31,7 @@ TELEGRAM_CHAT_ID=...
 | `D:\guidejung\업데이트.bat` 더블클릭 | key·BlogAutomator·autopost·shot을 GitHub 최신으로 받고, 새 코드를 받은 프로그램이 켜져 있으면 다시 켬 (`update_all.ps1`, 기록 `logs\update.log`). 처음 한 번은 `update_all.bat`으로 실행하면 `업데이트.bat`이 만들어짐 |
 
 - 씨앗 키워드: `seeds.txt` (한 줄에 하나)
+- 다시 추천하지 않는 키워드: 최근 3일(`exclude_recent_days`) 추천한 것, **블로그로 보낸 것**, **작성 완료** 누른 것 (띄어쓰기·대소문자 무시). 그날 리포트는 아침 첫 결과를 유지하므로 바로 반영하려면 `python daily_keywords.py --refresh`
 - 작년 시즌 검색수 = 현재 월 검색수 × 데이터랩 추이 비율 (추정값)
 - 기회 지수 = 작년 시즌 검색수 ÷ (블로그 + 카페 글 수)
 - 추천 키워드마다 실제로 검색되는 세부 키워드 3개를 함께 보여 줍니다

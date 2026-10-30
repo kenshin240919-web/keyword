@@ -125,13 +125,16 @@ def open_db():
 
 
 def excluded_keywords(db, today, recent_days):
+    """Keywords not to recommend again (compared without spaces, case-insensitive): those recommended in the
+    last few days, written ('작성 완료'), and **sent to the blogs** — a keyword sent but not yet marked written
+    came back the next day (2026-10-30)."""
     since = (today - timedelta(days=recent_days)).isoformat()
     rows = db.execute(
         "SELECT keyword FROM recommendations WHERE day >= ? AND day < ? "
-        "UNION SELECT keyword FROM written",
+        "UNION SELECT keyword FROM written UNION SELECT keyword FROM sent",
         (since, today.isoformat()),
     )
-    return {r[0] for r in rows}
+    return {normalize(r[0]).upper() for r in rows}
 
 
 # ---------- 수집 ----------
@@ -728,7 +731,7 @@ def run(today=None, refresh=False, seeds=None, period=None, open_browser=True):
     skip = set() if custom else excluded_keywords(db, today, config["exclude_recent_days"])
     scan = sorted(
         ((kw, vol) for kw, (vol, _) in found.items()
-         if vol >= config["min_now_volume"] and kw not in skip and not any(b in kw for b in banned)),
+         if vol >= config["min_now_volume"] and normalize(kw).upper() not in skip and not any(b in kw for b in banned)),
         key=lambda x: x[1], reverse=True)[:config["scan_limit"]]
     log(f"  연관 키워드 {len(found)}개 → 추정 대상 {len(scan)}개")
 
