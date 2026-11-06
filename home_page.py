@@ -30,6 +30,7 @@ iframe, .pane { position:absolute; inset:0; width:100%; height:100%; border:0; b
 .pane { overflow:auto; padding:28px 16px; }
 .box { max-width:760px; margin:0 auto; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:22px 24px; line-height:1.7; }
 .box h2 { margin:0 0 10px; font-size:19px; }
+.box button { font:inherit; padding:6px 14px; border-radius:8px; border:1px solid #2b6cb0; background:#2b6cb0; color:#fff; cursor:pointer; margin-right:10px; }
 .box pre { background:#f7f8fa; border:1px solid var(--line); border-radius:8px; padding:10px; font-size:12px; white-space:pre-wrap; max-height:260px; overflow:auto; }
 .box table { border-collapse:collapse; width:100%; font-size:14px; }
 .box td { border-top:1px solid var(--line); padding:8px 6px; vertical-align:top; }
@@ -79,15 +80,32 @@ const HELP = `<h2>무엇을 누르면 되나요?</h2>
 <tr><td>작업 표시줄의 크롬 창</td><td>블로그 크롬 4개와 Flow 크롬 1개는 글과 영상을 넣는 데 필요해서 최소화된 채로 켜 둡니다. 닫지 마세요.</td></tr>
 </table>`;
 
+let autoMade = false;
 async function reportPane() {
-  const d = await fetch('/api/today').then(r => r.json()).catch(() => ({}));
+  const d = await fetch('/api/today', { cache: 'no-store' }).then(r => r.json()).catch(() => ({}));
   if (d.report) return frame('/reports/' + encodeURIComponent(d.report));
-  const p = box('<h2>오늘 키워드를 뽑는 중입니다</h2><p>오늘 처음이면 몇 분 걸립니다. 다 되면 이 탭에 저절로 나옵니다.</p><pre id="dailylog">' + esc(d.log || '') + '</pre>');
-  const timer = setInterval(async () => {
-    const n = await fetch('/api/today').then(r => r.json()).catch(() => ({}));
-    if (n.report) { clearInterval(timer); delete panes.report; if (current === 'report') show('report'); }
-    else { const pre = p.querySelector('#dailylog'); if (pre) pre.textContent = n.log || ''; }
-  }, 5000);
+  const p = box('<div id="todaybox"></div>');
+  const render = n => {
+    const older = n.latest ? ' <a href="/reports/' + encodeURIComponent(n.latest) + '" target="_blank">지난 리포트 보기 (' + esc(n.latest.replace('.html', '')) + ')</a>' : '';
+    p.querySelector('#todaybox').innerHTML = n.running
+      ? '<h2>오늘 키워드를 뽑는 중입니다</h2><p>몇 분 걸립니다. 다 되면 이 탭에 저절로 나옵니다. 아래 기록이 계속 늘어나면 진행 중입니다.</p><pre>' + esc(n.log || '') + '</pre>'
+      : '<h2>오늘 키워드가 아직 없습니다</h2><p>지금 뽑고 있지도 않습니다. <button id="make">지금 뽑기</button>' + older + '</p><p style="color:#667085">몇 분 걸리고, 다 되면 이 탭에 저절로 나옵니다.</p><pre>' + esc(n.log || '') + '</pre>';
+    const b = p.querySelector('#make');
+    if (b) b.onclick = make;
+  };
+  const make = async () => {
+    await fetch('/api/make-today', { method: 'POST', headers: { 'X-Report-App': '1', 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
+    setTimeout(tick, 1500);
+  };
+  const tick = async () => {
+    const n = await fetch('/api/today', { cache: 'no-store' }).then(r => r.json()).catch(() => ({}));
+    if (n.report) { clearInterval(timer); delete panes.report; p.remove(); if (current === 'report') show('report'); return; }
+    render(n);
+  };
+  render(d);
+  // Nothing running and no report (e.g. this tab stayed open past midnight): start it once by itself.
+  if (!d.running && !autoMade) { autoMade = true; make(); }
+  const timer = setInterval(tick, 5000);
   return p;
 }
 function esc(s) { return String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]); }

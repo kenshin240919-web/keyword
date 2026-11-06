@@ -65,6 +65,11 @@ TELEGRAM_KEYS = ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID")
 
 
 LOG_SINK = None  # the report server's 직접 뽑기 page reads the progress lines through this
+# Exists while today's report is being made; touched on every log line. The guidejung home shows "뽑는 중" only
+# while it is fresh, and offers [지금 뽑기] otherwise (a home tab left open overnight showed "뽑는 중" with
+# nothing running, 2026-11-07).
+RUNNING_FILE = BASE_DIR / "logs" / "daily_running"
+_making = False
 
 
 def log(msg):
@@ -72,6 +77,11 @@ def log(msg):
     print(line, flush=True)
     if LOG_SINK:
         LOG_SINK(line)
+    if _making:
+        try:
+            os.utime(RUNNING_FILE)
+        except OSError:
+            pass
 
 
 def load_config():
@@ -866,7 +876,18 @@ def main():
     elif args.skip_if_done and (REPORT_DIR / f"{date.today().isoformat()}.html").exists():
         log("오늘 리포트가 이미 있어 건너뜁니다.")
     else:
-        run(refresh=args.refresh)
+        global _making
+        RUNNING_FILE.parent.mkdir(exist_ok=True)
+        RUNNING_FILE.write_text(str(os.getpid()), encoding="utf-8")
+        _making = True
+        try:
+            run(refresh=args.refresh)
+        finally:
+            _making = False
+            try:
+                RUNNING_FILE.unlink()
+            except OSError:
+                pass
 
 
 if __name__ == "__main__":

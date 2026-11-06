@@ -46,7 +46,7 @@ REPORT_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}\.(html|csv)$")
 CUSTOM_NAME = re.compile(r"^직접뽑기/\d{4}-\d{2}-\d{2}_\d{4}_[0-9A-Za-z가-힣]+\.(html|csv)$")  # daily_keywords.py --seeds
 BASE_URL = f"http://{HOST}:{PORT}"
 # 서버 코드를 바꾸면 올립니다. 예전 버전 서버가 떠 있으면 끄고 새로 켭니다.
-SERVER_VERSION = 27
+SERVER_VERSION = 28
 LOG_PATH = dk.BASE_DIR / "logs" / "report_server.log"
 
 
@@ -297,13 +297,34 @@ class Handler(BaseHTTPRequestHandler):
             sent_today = bool(db.execute("SELECT 1 FROM sent WHERE day = ?", (time.strftime('%Y-%m-%d'),)).fetchone())
         finally:
             db.close()
-        log = ""
+        log, running = "", False
         if not report:
+            try:  # being made: the marker daily_keywords.py keeps fresh while it works (stale after 15 minutes)
+                running = time.time() - dk.RUNNING_FILE.stat().st_mtime < 15 * 60
+            except OSError:
+                pass
             try:
                 log = "\n".join((dk.BASE_DIR / "logs" / "daily.log").read_text(encoding="utf-8", errors="replace").splitlines()[-12:])
             except OSError:
                 pass
-        return {"report": report, "sent_today": sent_today, "log": log}
+        return {"report": report, "running": running, "latest": latest_report(), "sent_today": sent_today, "log": log}
+
+    def _make_today(self):
+        """[지금 뽑기] on the home page: today's report, made in the background without a window."""
+        today = self._today()
+        if today["report"] or today["running"]:
+            return {"started": False}
+        logs = dk.BASE_DIR / "logs"
+        logs.mkdir(exist_ok=True)
+        exe = Path(sys.executable)
+        if exe.name.lower() == "pythonw.exe" and exe.with_name("python.exe").exists():
+            exe = exe.with_name("python.exe")
+        env = {**os.environ, "GUIDEJUNG_NO_BROWSER": "1", "PYTHONUTF8": "1"}
+        flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        with open(logs / "daily.log", "a", encoding="utf-8") as out:
+            subprocess.Popen([str(exe), str(dk.BASE_DIR / "daily_keywords.py"), "--skip-if-done"], cwd=str(dk.BASE_DIR), env=env,
+                             stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, creationflags=flags)
+        return {"started": True}
 
     def do_GET(self):
         Handler.last_seen = time.time()
@@ -356,8 +377,10 @@ class Handler(BaseHTTPRequestHandler):
     def _do_post(self):
         Handler.last_seen = time.time()
         # 다른 웹사이트가 몰래 기록을 바꾸지 못하도록, 리포트 페이지만 붙이는 헤더를 요구합니다.
-        if self.path not in ("/api/written", "/api/post", "/api/post-plan", "/api/shutdown", "/api/action") or self.headers.get("X-Report-App") != "1":
+        if self.path not in ("/api/written", "/api/post", "/api/post-plan", "/api/shutdown", "/api/action", "/api/make-today") or self.headers.get("X-Report-App") != "1":
             return self._json(403, {"error": "forbidden"})
+        if self.path == "/api/make-today":
+            return self._json(200, self._make_today())
         if self.path == "/api/shutdown":
             self._json(200, {"ok": True})
             return threading.Thread(target=self.server.shutdown, daemon=True).start()
