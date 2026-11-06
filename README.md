@@ -26,8 +26,10 @@ TELEGRAM_CHAT_ID=...
 | `python daily_keywords.py --written 궁합` | 이미 쓴 키워드로 기록 (이후 추천 제외) |
 | `python daily_keywords.py --unwritten 궁합` | 잘못 기록한 키워드 취소 |
 | `setup_task.bat` 더블클릭 | 자동 실행 등록: 로그인할 때 + 매일 07:50 (하루 1번만). 실행할 때마다 먼저 4개 프로그램을 업데이트 |
-| `D:\guidejung\전체실행.bat` (바탕화면 'guidejung 전체 실행') | Local·Blog Automator·autopost·shot·블로그 크롬 4개·Flow용 크롬을 한 번에 켜고(켜진 것은 건너뜀) 리포트와 전체 진행 상황을 엶 (`start_all.ps1`) |
-| 전체 진행 상황 `http://127.0.0.1:8765/status` (바탕화면 'guidejung 진행 상황' = `progress.bat`, 리포트 서버가 꺼져 있으면 켜고 엶) | 프로그램 켜짐 여부, 블로그 1~4번의 글 작성 → 숏폼 영상 → 네이버 임시저장, 사이트 발행을 한 화면에서 (`status_page.py`, 3초마다 갱신) |
+| 바탕화면 **guidejung 시작** (`D:\guidejung\전체실행.bat` → `start_all.ps1`) | guidejung 홈(브라우저 탭 1개)을 열고 Local·Blog Automator·autopost·shot·블로그 크롬 4개·Flow용 크롬을 켬(켜진 것은 건너뜀). 프로그램 창은 띄우지 않고, 오늘 키워드도 창 없이 뽑아 홈에 보여 줌. 홈이 이미 열려 있으면 새 탭을 열지 않음 |
+| guidejung 홈 `http://127.0.0.1:8765/home` (`home_page.py`) | 한 화면에서 탭으로: ① 오늘 키워드(리포트) · ② 진행 상황(`/status`, `status_page.py`) · 영상(shot 8790) · 사이트 글(autopost 8777) · 도움말. 리포트에서 보내면 진행 상황 탭으로 넘어감 |
+| 바탕화면 **guidejung 끄기** (`D:\guidejung\모두끄기.bat` → `stop_all.ps1`) | Blog Automator·autopost·shot·리포트 서버·블로그/Flow 크롬을 끔 (작업 중이면 먼저 물어봄, Local은 그대로) |
+| 바탕화면 **guidejung 업데이트** (`D:\guidejung\업데이트.bat`) | 4개 프로그램을 GitHub 최신 코드로. 바탕화면은 이 3개만 두고, 블로그·Flow 크롬 바로가기는 `D:\guidejung\바로가기`로 옮김 |
 | `D:\guidejung\업데이트.bat` 더블클릭 | key·BlogAutomator·autopost·shot을 GitHub 최신으로 받고, 새 코드를 받은 프로그램이 켜져 있으면 다시 켬 (`update_all.ps1`, 기록 `logs\update.log`). 처음 한 번은 `update_all.bat`으로 실행하면 `업데이트.bat`이 만들어짐 |
 
 - 씨앗 키워드: `seeds.txt` (한 줄에 하나)

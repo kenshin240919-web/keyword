@@ -1,6 +1,8 @@
 ﻿# guidejung 프로그램을 한 번에 켭니다. 이미 켜져 있는 것은 건너뜁니다.
-#   D:\guidejung\전체실행.bat (또는 바탕화면 'guidejung 전체 실행')으로 실행합니다.
-# 순서: Local → Blog Automator → autopost → shot → 블로그 크롬 4개 → Flow용 크롬 → 리포트 + 전체 진행 상황
+#   바탕화면 'guidejung 시작' (= D:\guidejung\전체실행.bat)으로 실행합니다.
+# 순서: guidejung 홈(브라우저 탭 1개) → Local → Blog Automator → autopost → shot → 블로그 크롬 4개 → Flow용 크롬
+#       → 오늘 키워드 뽑기(창 없이, 결과는 홈의 '오늘 키워드' 탭에)
+# 프로그램 창은 띄우지 않고 뒤에서 돌립니다. 끌 때는 바탕화면 'guidejung 끄기' (2026-11-06).
 $ErrorActionPreference = 'Continue'
 $base = Split-Path -Parent $PSScriptRoot
 
@@ -19,7 +21,14 @@ function Chrome-Exe {
 }
 $chromeLines = @(Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" -ErrorAction SilentlyContinue | ForEach-Object { $_.CommandLine })
 
-Say '=== guidejung 전체 실행 ===' Cyan
+Say '=== guidejung 시작 ===' Cyan
+
+# 0. guidejung 홈 (리포트 서버 8765): 모든 화면이 이 탭 하나에. 이미 열려 있으면 새 탭을 열지 않습니다.
+Push-Location $PSScriptRoot
+$env:PYTHONUTF8 = '1'
+& python report_server.py --home
+Pop-Location
+Say '[guidejung 홈] 브라우저에 열었습니다. 나머지 프로그램이 켜지는 동안 진행 상황 탭에서 초록색으로 바뀝니다.' Green
 
 # 1. Local (워드프레스)
 if (Get-Process -Name 'Local' -ErrorAction SilentlyContinue) { Say '[Local] 이미 켜져 있음' }
@@ -49,21 +58,23 @@ else {
 if (Test-Port 8777) { Say '[autopost] 이미 켜져 있음' }
 else {
     $dir = Join-Path $base 'move\autopost'
-    Start-Process -FilePath 'python' -ArgumentList 'app.py', '--no-browser' -WorkingDirectory $dir -WindowStyle Minimized
-    Say '[autopost] 켰습니다 (작업 표시줄에 최소화된 창 — 닫으면 꺼집니다).' Green
+    Start-Process -FilePath 'python' -ArgumentList 'app.py', '--no-browser' -WorkingDirectory $dir -WindowStyle Hidden
+    Say '[autopost] 켰습니다 (창 없이 — 화면은 홈의 사이트 글 탭).' Green
 }
 
 # 4. shot (8790) — without the Typecast (grandmother voice) key; narration is the Flow video's own voice, no key needed
 if (Test-Port 8790) { Say '[shot] 이미 켜져 있음' }
 else {
     $dir = Join-Path $base 'shot'
-    Start-Process -FilePath 'powershell.exe' -WorkingDirectory $dir -WindowStyle Minimized `
+    $env:SHOT_NO_BROWSER = '1'  # its screen is the home page's 영상 tab, not a tab of its own
+    Start-Process -FilePath 'powershell.exe' -WorkingDirectory $dir -WindowStyle Hidden `
         -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $dir 'run_typecast.ps1'), '-NoTypecast'
-    Say '[shot] 켰습니다 (작업 표시줄에 최소화 — 닫으면 꺼집니다).' Green
+    Remove-Item Env:SHOT_NO_BROWSER -ErrorAction SilentlyContinue
+    Say '[shot] 켰습니다 (창 없이 — 화면은 홈의 영상 탭).' Green
 }
 
-# 5. 블로그 크롬 1~4번 (바탕화면 바로가기, 전용 프로필 BlogAutomator\chrome\chrome-N)
-$desktops = @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('CommonDesktopDirectory'))
+# 5. 블로그 크롬 1~4번 (바로가기: D:\guidejung\바로가기 또는 바탕화면, 전용 프로필 BlogAutomator\chrome\chrome-N)
+$desktops = @((Join-Path $base '바로가기'), [Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('CommonDesktopDirectory'))
 $chrome = Chrome-Exe
 foreach ($n in 1..4) {
     $profileDir = Join-Path $base "BlogAutomator\chrome\chrome-$n"
@@ -90,17 +101,12 @@ elseif ($chrome) {
 }
 else { Say '[Flow 전용 크롬] 크롬을 찾지 못했습니다. 직접 켜 주세요.' Yellow }
 
-# 7. 리포트 + 전체 진행 상황
-Say '프로그램이 준비되기를 기다리는 중...'
-$null = Wait-Port 37321 30
-# The status page first (starts the report server by itself), then the report (may take a while on the first run of the day).
-Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', 'progress.bat' -WorkingDirectory $PSScriptRoot -WindowStyle Minimized
-Say '[전체 진행 상황] 여는 중' Green
-# The report waits for the report server the status page just started (both starting it at once could
-# clash), and runs in a normal window: making today's report takes minutes, and an error stays readable.
-$null = Wait-Port 8765 20
-Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', 'open_report.bat' -WorkingDirectory $PSScriptRoot
-Say '[오늘의 리포트] 여는 중 (처음 여는 날은 키워드를 뽑느라 몇 분 걸립니다. 새 창에서 진행 상황이 보입니다)' Green
+# 7. 오늘 키워드 뽑기: 창 없이 돌고, 결과는 홈의 '오늘 키워드' 탭에 나옵니다 (오늘 이미 했으면 바로 끝).
+$env:GUIDEJUNG_NO_BROWSER = '1'
+Start-Process -FilePath 'cmd.exe' -WorkingDirectory $PSScriptRoot -WindowStyle Hidden `
+    -ArgumentList '/c', 'if not exist logs mkdir logs & python daily_keywords.py --skip-if-done >> logs\daily.log 2>&1'
+Remove-Item Env:GUIDEJUNG_NO_BROWSER -ErrorAction SilentlyContinue
+Say '[오늘 키워드] 뽑는 중 (창 없이 — 홈의 오늘 키워드 탭에 나옵니다)' Green
 
-Say '=== 끝 — 빨간 항목은 진행 상황 페이지에서 확인하세요. 이 창은 10초 뒤 닫힙니다. ===' Cyan
-Start-Sleep 10
+Say '=== 끝 — 이제 브라우저의 guidejung 탭만 보시면 됩니다. 이 창은 5초 뒤 닫힙니다. ===' Cyan
+Start-Sleep 5

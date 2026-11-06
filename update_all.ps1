@@ -66,7 +66,12 @@ function Restart-App($app, [string]$dir) {
         'key' {
             # The report server starts again (new code) the next time a report is opened.
             $r = Invoke-Local 'POST' 'http://127.0.0.1:8765/api/shutdown' @{ 'X-Report-App' = '1' }
-            if ($r.ok) { Say '  리포트 서버를 껐습니다. 다음에 리포트를 열면 새 버전으로 켜집니다.' }
+            # Started again at once (no window): an open guidejung home tab keeps working.
+            if ($r.ok) {
+                Start-Sleep 1
+                Push-Location $dir; $env:PYTHONUTF8 = '1'; & python report_server.py --start; Pop-Location
+                Say '  guidejung 홈(리포트 서버)을 새 버전으로 다시 켰습니다. 홈 탭이 이상하면 새로 고침(F5) 해 주세요.' Green
+            }
         }
         'BlogAutomator' {
             $r = Invoke-Local 'GET' 'http://127.0.0.1:37321/api/status' @{ 'X-Blogauto' = '1' }
@@ -85,8 +90,8 @@ function Restart-App($app, [string]$dir) {
             }
             Stop-AppTree $procId
             Wait-PortFree $app.Port
-            Start-Process -FilePath 'python' -ArgumentList 'app.py', '--no-browser' -WorkingDirectory $dir -WindowStyle Minimized
-            Say '  autopost를 다시 켰습니다 (작업 표시줄에 최소화).' Green
+            Start-Process -FilePath 'python' -ArgumentList 'app.py', '--no-browser' -WorkingDirectory $dir -WindowStyle Hidden
+            Say '  autopost를 다시 켰습니다 (창 없이).' Green
         }
         'shot' {
             # shot keeps the API keys typed at start: it exits with code 75 and its launcher starts it again.
@@ -151,47 +156,60 @@ if (-not (Test-Path $launcher) -or [IO.File]::ReadAllText($launcher) -ne $launch
     Say "더블클릭용 $launcher 을(를) 만들었습니다."
 }
 
-# One-click start of every program, plus a desktop shortcut to it.
+# One-click start / stop of every program (2026-11-06: one home page, three desktop icons).
 $starter = Join-Path $base '전체실행.bat'
 $starterText = "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"%~dp0key\start_all.ps1`"`r`n"
 if (-not (Test-Path $starter) -or [IO.File]::ReadAllText($starter) -ne $starterText) {
     [IO.File]::WriteAllText($starter, $starterText, [Text.Encoding]::ASCII)
     Say "한 번에 켜기용 $starter 을(를) 만들었습니다."
 }
+$stopper = Join-Path $base '모두끄기.bat'
+$stopperText = "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"%~dp0key\stop_all.ps1`"`r`n"
+if (-not (Test-Path $stopper) -or [IO.File]::ReadAllText($stopper) -ne $stopperText) {
+    [IO.File]::WriteAllText($stopper, $stopperText, [Text.Encoding]::ASCII)
+    Say "한 번에 끄기용 $stopper 을(를) 만들었습니다."
+}
+
+# Desktop: only 'guidejung 시작 / 업데이트 / 끄기'. The other guidejung shortcuts (blog Chromes, Flow Chrome, the old
+# 전체 실행 / 진행 상황) go to D:\guidejung\바로가기; start_all.ps1 finds the blog Chrome shortcuts there.
 $desktop = [Environment]::GetFolderPath('Desktop')
-$shortcut = if ($desktop) { Join-Path $desktop 'guidejung 전체 실행.lnk' } else { $null }
-if ($shortcut -and -not (Test-Path $shortcut)) {
+$tools = Join-Path $base '바로가기'
+New-Item -ItemType Directory -Force -Path $tools | Out-Null
+function Set-Shortcut([string]$path, [string]$target, [string]$arguments = '', [int]$style = 1) {
     try {
-        $lnk = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut)
-        $lnk.TargetPath = $starter; $lnk.WorkingDirectory = $base; $lnk.Save()
-        Say "바탕화면에 'guidejung 전체 실행' 바로가기를 만들었습니다."
-    } catch { Say "바탕화면 바로가기를 만들지 못했습니다: $($_.Exception.Message)" Yellow }
+        $lnk = (New-Object -ComObject WScript.Shell).CreateShortcut($path)
+        $lnk.TargetPath = $target; $lnk.Arguments = $arguments; $lnk.WorkingDirectory = $base; $lnk.WindowStyle = $style; $lnk.Save()
+        return $true
+    } catch { Say "바로가기를 만들지 못했습니다 ($path): $($_.Exception.Message)" Yellow; return $false }
 }
-
-# Desktop shortcut to the overall status page (starts the report server when it is off).
-$statusShortcut = if ($desktop) { Join-Path $desktop 'guidejung 진행 상황.lnk' } else { $null }
-if ($statusShortcut -and -not (Test-Path $statusShortcut)) {
-    try {
-        $lnk = (New-Object -ComObject WScript.Shell).CreateShortcut($statusShortcut)
-        $lnk.TargetPath = Join-Path $PSScriptRoot 'progress.bat'; $lnk.WorkingDirectory = $PSScriptRoot; $lnk.WindowStyle = 7; $lnk.Save()
-        Say "바탕화면에 'guidejung 진행 상황' 바로가기를 만들었습니다."
-    } catch { Say "진행 상황 바로가기를 만들지 못했습니다: $($_.Exception.Message)" Yellow }
+if ($desktop) {
+    $icons = @(@{ Name = 'guidejung 시작'; Target = $starter; Style = 7 }, @{ Name = 'guidejung 업데이트'; Target = $launcher; Style = 1 },
+               @{ Name = 'guidejung 끄기'; Target = $stopper; Style = 1 })
+    foreach ($icon in $icons) {
+        $path = Join-Path $desktop "$($icon.Name).lnk"
+        if (-not (Test-Path $path) -and (Set-Shortcut $path $icon.Target '' $icon.Style)) { Say "바탕화면에 '$($icon.Name)' 아이콘을 만들었습니다." Green }
+    }
+    foreach ($old in @('guidejung 전체 실행.lnk', 'guidejung 진행 상황.lnk')) {  # replaced by 'guidejung 시작' and its home page
+        $path = Join-Path $desktop $old
+        if (Test-Path $path) { Remove-Item -LiteralPath $path -Force; Say "바탕화면의 '$($old -replace '\.lnk$')' 아이콘을 지웠습니다 (guidejung 시작이 대신함)." }
+    }
+    $moved = @(Get-ChildItem -LiteralPath $desktop -Filter '*.lnk' -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^블로그 [1-4]번' -or $_.Name -eq 'Flow 영상 크롬.lnk' })
+    foreach ($m in $moved) { Move-Item -LiteralPath $m.FullName -Destination (Join-Path $tools $m.Name) -Force }
+    if ($moved.Count) { Say "바탕화면의 크롬 바로가기 $($moved.Count)개를 $tools 폴더로 옮겼습니다." Green }
 }
+$public = [Environment]::GetFolderPath('CommonDesktopDirectory')
+$publicLeft = @(Get-ChildItem -LiteralPath $public -Filter '*.lnk' -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^블로그 [1-4]번|^Flow 영상 크롬|^guidejung ' })
+if ($publicLeft.Count) { Say "공용 바탕화면의 바로가기($($publicLeft.Name -join ', '))는 관리자 권한이 있어야 옮길 수 있어 그대로 두었습니다. 직접 $tools 폴더로 옮겨 주세요." Yellow }
 
-# Desktop shortcut for the Flow Chrome: its own profile (D:\guidejung\chrome-flow), kept rendering while minimized.
-$flowShortcut = if ($desktop) { Join-Path $desktop 'Flow 영상 크롬.lnk' } else { $null }
+# Flow Chrome shortcut (its own profile D:\guidejung\chrome-flow, kept rendering while minimized), in the 바로가기 folder.
+$flowShortcut = Join-Path $tools 'Flow 영상 크롬.lnk'
 $chromePath = @((Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe' -ErrorAction SilentlyContinue).'(default)',
     "$env:ProgramFiles\Google\Chrome\Application\chrome.exe", "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
     "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe") | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
-if ($flowShortcut -and -not $chromePath) { Say '크롬(chrome.exe)을 찾지 못해 Flow 크롬 바로가기를 만들지 못했습니다.' Yellow }
-if ($flowShortcut -and $chromePath -and -not (Test-Path $flowShortcut)) {
-    try {
-        $lnk = (New-Object -ComObject WScript.Shell).CreateShortcut($flowShortcut)
-        $lnk.TargetPath = $chromePath
-        $lnk.Arguments = "--user-data-dir=`"$(Join-Path $base 'chrome-flow')`" --disable-renderer-backgrounding --disable-background-timer-throttling --disable-backgrounding-occluded-windows https://flow.google.com/"
-        $lnk.Save()
-        Say "바탕화면에 'Flow 영상 크롬' 바로가기를 만들었습니다."
-    } catch { Say "Flow 크롬 바로가기를 만들지 못했습니다: $($_.Exception.Message)" Yellow }
+if (-not $chromePath) { Say '크롬(chrome.exe)을 찾지 못해 Flow 크롬 바로가기를 만들지 못했습니다.' Yellow }
+elseif (-not (Test-Path $flowShortcut)) {
+    $flowArgs = "--user-data-dir=`"$(Join-Path $base 'chrome-flow')`" --disable-renderer-backgrounding --disable-background-timer-throttling --disable-backgrounding-occluded-windows https://flow.google.com/"
+    if (Set-Shortcut $flowShortcut $chromePath $flowArgs) { Say "$tools 폴더에 'Flow 영상 크롬' 바로가기를 만들었습니다." }
 }
 
 if ($problems) { Say "=== 끝 (확인할 것 $problems 건, 위 노란색·빨간색 줄) ===" Yellow }

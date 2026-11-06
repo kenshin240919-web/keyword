@@ -8,6 +8,8 @@ rem replace this file safely.
   if not exist logs mkdir logs
   powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0update_all.ps1" -Startup >NUL 2>&1
   set PYTHONUTF8=1
+  rem the report shows in the guidejung home page (keywords tab), not in a browser tab of its own
+  set GUIDEJUNG_NO_BROWSER=1
   python daily_keywords.py --skip-if-done >> logs\daily.log 2>&1
   exit /b
 )

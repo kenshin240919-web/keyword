@@ -506,13 +506,14 @@ document.addEventListener('click', async e => {
   try {
     const d = await call('/api/post');
     renderSent(d.sent);
-    alert('네이버 블로그 ' + d.jobs + '곳에 보냈습니다 (진행 상황: 크롬 Blog Automator 사이드패널).'
+    alert('네이버 블로그 ' + d.jobs + '곳에 보냈습니다.'
       + (d.thumbs ? '\\n썸네일 ' + d.thumbs + '장을 만들어 함께 보냈습니다 (thumbnails 폴더).' : '')
-      + (d.autopost ? '\\n사이트 자동 포스팅도 시작했습니다 (진행 상황: http://127.0.0.1:8777). '
+      + (d.autopost ? '\\n사이트(guidejung·gov) 글쓰기도 시작했습니다. '
         + (d.archived ? '쓴 이미지는 사용완료 폴더로 옮겼습니다.' : d.image ? '대표 이미지: ' + d.image : '(이미지 없이 발행)') : '')
       + (d.warning ? '\\n\\n' + d.warning : '')
-      + '\\n\\n확인을 누르면 전체 진행 상황 페이지가 열립니다.');
-    window.open('/status', 'guidejung-status');
+      + '\\n\\n확인을 누르면 진행 상황으로 넘어갑니다.');
+    // Inside the guidejung home this switches its tab; opened on its own, it goes to the home page.
+    window.top.location.href = '/home#status';
   } catch (err) {
     alert('보내지 못했습니다: ' + (err.message === 'Failed to fetch'
       ? '리포트 서버와 연결이 끊겼습니다. open_report.bat으로 리포트를 다시 연 뒤 눌러 주세요. 계속되면 logs 폴더의 report_server.log를 보여 주세요.'
@@ -612,7 +613,7 @@ button.w:disabled {{ border-color: #bbb; color: #999; background: #f5f5f5; curso
 .done .kw, .done .mk {{ text-decoration: line-through; color: #888; }}
 .notice {{ max-width: 1400px; background: #fff3f3; border: 1px solid #f2b8b5; color: #8c1d18; border-radius: 8px; padding: 10px 14px; margin: 12px 0; }}
 </style></head><body>
-<h1>오늘의 블로그 키워드 · {today} <a href="/status" target="_blank" style="font-size:15px;font-weight:normal">전체 진행 상황 보기 →</a></h1>
+<h1>오늘의 블로그 키워드 · {today} <a href="/home#status" target="_top" style="font-size:15px;font-weight:normal">전체 진행 상황 보기 →</a></h1>
 <p class="meta"><b>작년 시즌 {period_text} 검색수 기준</b> · 후보 {stats['candidates']}개 중 점수 상위 {len(rows)}개<br>
 작년 시즌 검색수 = 현재 월 검색수 × 데이터랩 추이 비율(추정) · 기회 지수 = 작년 시즌 검색수 ÷ (블로그 + 카페 글 수) · 시즌 변화 = 작년 시즌 ÷ 최근 30일</p>
 <div class="picks"><h2>오늘 꼭 쓸 키워드 {len(musts)}개</h2>
@@ -813,7 +814,7 @@ def publish(top, today, candidates, config, period=None):
 # 직접 뽑기 결과 페이지는 매일 리포트와 헷갈리지 않게 제목·문구·색을 바꿉니다.
 CUSTOM_WORDS = (("오늘의 블로그 키워드", "직접 뽑은 키워드"), ("오늘 꼭 쓸 키워드", "꼭 쓸 키워드"),
                 ("작년 시즌", "선택 기간"), ("작년 이 시기", "선택 기간"), ("시즌 변화", "기간 변화"),
-                (' <a href="/status" target="_blank" style="font-size:15px;font-weight:normal">전체 진행 상황 보기 →</a>', ""))
+                (' <a href="/home#status" target="_top" style="font-size:15px;font-weight:normal">전체 진행 상황 보기 →</a>', ""))
 CUSTOM_STYLE = ("<style>body{background:#f3f6ff} h1{color:#1e4e8c} h1::before{content:'직접 뽑기 결과';display:block;"
                 "font-size:13px;font-weight:700;color:#fff;background:#2b6cb0;border-radius:6px;padding:3px 10px;width:max-content;margin-bottom:6px}</style>")
 

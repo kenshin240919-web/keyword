@@ -34,7 +34,9 @@ try:
     import thumbnail      # Pillow가 없으면 썸네일만 빼고 나머지는 그대로 동작합니다.
 except ImportError:
     thumbnail = None
+import home_page
 import keywordstool
+import os
 import status_page
 
 HOST = "127.0.0.1"
@@ -44,7 +46,7 @@ REPORT_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}\.(html|csv)$")
 CUSTOM_NAME = re.compile(r"^직접뽑기/\d{4}-\d{2}-\d{2}_\d{4}_[0-9A-Za-z가-힣]+\.(html|csv)$")  # daily_keywords.py --seeds
 BASE_URL = f"http://{HOST}:{PORT}"
 # 서버 코드를 바꾸면 올립니다. 예전 버전 서버가 떠 있으면 끄고 새로 켭니다.
-SERVER_VERSION = 25
+SERVER_VERSION = 26
 LOG_PATH = dk.BASE_DIR / "logs" / "report_server.log"
 
 
@@ -177,6 +179,7 @@ def latest_report():
 
 class Handler(BaseHTTPRequestHandler):
     last_seen = time.time()
+    home_seen = 0.0  # last ping from an open /home tab
 
     def log_message(self, *args):
         pass
@@ -284,9 +287,36 @@ class Handler(BaseHTTPRequestHandler):
                 skip_blog_link(keywords[0])
         self._json(200, result)
 
+    def _today(self):
+        """For the home page: today's report (or None while it is being made), the progress lines, and whether
+        keywords were already sent to the blogs today (then it opens on 진행 상황)."""
+        name = f"{time.strftime('%Y-%m-%d')}.html"
+        report = name if (dk.REPORT_DIR / name).is_file() else None
+        db = dk.open_db()
+        try:
+            sent_today = bool(db.execute("SELECT 1 FROM sent WHERE day = ?", (time.strftime('%Y-%m-%d'),)).fetchone())
+        finally:
+            db.close()
+        log = ""
+        if not report:
+            try:
+                log = "\n".join((dk.BASE_DIR / "logs" / "daily.log").read_text(encoding="utf-8", errors="replace").splitlines()[-12:])
+            except OSError:
+                pass
+        return {"report": report, "sent_today": sent_today, "log": log}
+
     def do_GET(self):
         Handler.last_seen = time.time()
         path = self.path.split("?", 1)[0]
+        if path == "/home":
+            return self._send(200, home_page.HOME_HTML, "text/html; charset=utf-8")
+        if path == "/api/home-ping":
+            Handler.home_seen = time.time()
+            return self._json(200, {"ok": True})
+        if path == "/api/home-open":  # 'guidejung 시작' asks whether a home tab is already open
+            return self._json(200, {"open": time.time() - Handler.home_seen < 25})
+        if path == "/api/today":
+            return self._json(200, self._today())
         if path == "/api/ping":
             return self._json(200, {"ok": True, "version": SERVER_VERSION})
         if path == "/api/written":
@@ -298,6 +328,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/sent":
             return self._json(200, {"keywords": self._sent()})
         if path == "/":
+            # The home page is the front door; the newest report stays at /reports/<day>.html.
+            return self._send(302, b"", extra={"Location": "/home"})
+        if path == "/report":
             name = latest_report()
             if not name:
                 return self._send(200, "<meta charset='utf-8'>아직 리포트가 없습니다.", "text/html; charset=utf-8")
@@ -432,6 +465,10 @@ def start_background():
 def open_report(name=None):
     """리포트를 엽니다. 서버를 켤 수 없으면 기록 버튼 없이 파일로 엽니다."""
     name = name or latest_report()
+    # 'guidejung 시작' and the morning task make the report without a tab of its own: it shows in the home page.
+    if os.environ.get("GUIDEJUNG_NO_BROWSER") == "1":
+        start_background()
+        return
     if start_background():
         webbrowser.open(f"{BASE_URL}/reports/{urllib.parse.quote(name)}" if name else BASE_URL)
     elif name:
@@ -444,9 +481,24 @@ def main():
     parser = argparse.ArgumentParser(description="리포트 보기 + '오늘 썼어요' 기록 서버")
     parser.add_argument("--serve", action="store_true", help="서버만 실행")
     parser.add_argument("--status", action="store_true", help="(서버가 꺼져 있으면 켜고) 전체 진행 상황 페이지를 엽니다")
+    parser.add_argument("--start", action="store_true", help="서버만 켭니다 (창·탭 없이, 업데이트 뒤 다시 켤 때)")
+    parser.add_argument("--home", action="store_true", help="(서버가 꺼져 있으면 켜고) guidejung 홈을 엽니다. 이미 열려 있으면 새 탭을 열지 않음")
     args = parser.parse_args()
     if args.serve:
         serve()
+    elif args.start:
+        start_background()
+    elif args.home:
+        if not start_background():
+            dk.log("[경고] 리포트 서버를 켜지 못했습니다. logs\\report_server.log를 확인해 주세요.")
+            return
+        try:
+            with urllib.request.urlopen(f"{BASE_URL}/api/home-open", timeout=2) as resp:
+                already = json.loads(resp.read().decode("utf-8")).get("open")
+        except Exception:
+            already = False
+        if not already:
+            webbrowser.open(f"{BASE_URL}/home")
     elif args.status:
         if start_background():
             webbrowser.open(f"{BASE_URL}/status")

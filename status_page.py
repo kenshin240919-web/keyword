@@ -367,7 +367,7 @@ STATUS_HTML = """<!doctype html>
   <section><h2 id="title">진행 중인 키워드 없음</h2>
     <table><thead><tr><th>블로그</th><th>키워드</th><th>① 글 작성</th><th>② 숏폼 영상</th><th>③ QR 링크</th><th>④ 네이버 임시저장</th></tr></thead><tbody id="rows"></tbody></table></section>
   <section><h2>사이트 발행 (guidejung · gov) · 네이버 QR</h2><div id="site" class="note">-</div></section>
-  <p class="note">3초마다 자동으로 새로 고칩니다. 리포트: <a href="/">오늘 리포트 열기</a></p>
+  <p class="note">3초마다 자동으로 새로 고칩니다. 리포트: <a href="/home#report" target="_top">오늘 키워드 보기</a></p>
 </main>
 <script>
 const ICON = { ok: '✅', run: '⏳', err: '❌', warn: '⚠️', wait: '·' };
