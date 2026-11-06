@@ -69,10 +69,10 @@ def overview():
         seen = [v for k, v in clients.items() if k.split("@")[0] == str(n)]
         last = max((_iso_to_epoch(v) for v in seen), default=None)
         programs.append({"name": f"블로그 크롬 {n}번", "ok": last is not None and now - last < ALIVE_SECONDS,
-                         "fix": f"바탕화면 '블로그 {n}번' 바로가기"})
+                         "fix": f"D:\\guidejung\\바로가기 폴더의 '블로그 {n}번'"})
     last_flow = flow_poll.get("last_poll")
     programs.append({"name": "Flow 크롬", "ok": bool(last_flow) and now - last_flow < ALIVE_SECONDS,
-                     "fix": "바탕화면 'Flow 영상 크롬' (Shot Flow 확장 · 자동 생성 켜기)"})
+                     "fix": "D:\\guidejung\\바로가기 폴더의 'Flow 영상 크롬' (Shot Flow 확장 · 자동 생성 켜기)"})
 
     # Latest keyword sent from the report: the newest Blog Automator jobs that carry ctaKeyword.
     jobs = [j for j in (blog or {}).get("jobs", []) if j.get("ctaKeyword")]
