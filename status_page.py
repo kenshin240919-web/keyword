@@ -8,6 +8,7 @@
 """
 import json
 import socket
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -48,6 +49,15 @@ def _wordpress_sites():
         return {name: cfg["url"] for name, cfg in sites.items() if isinstance(cfg, dict) and cfg.get("url")}
     except (OSError, ValueError):
         return {}
+
+
+def _deployed(url, log):
+    """Whether autopost's log says this post's site was deployed ("<host> 배포 완료"). The host must stand on its own:
+    "gov.guidejung.com 배포 완료" also contains "guidejung.com 배포 완료", which once showed an undeployed guidejung post
+    as live and hid its [배포 다시] button (2026-11-06)."""
+    host = str(url).split("//")[-1].split("/")[0]
+    pattern = re.compile(r"(?:^|[\s(\[])" + re.escape(host) + r" 배포 완료")
+    return any(pattern.search(line) for line in log or [])
 
 
 def overview():
@@ -103,8 +113,7 @@ def overview():
     for j in (auto or {}).get("jobs", []):
         if keyword and j.get("keyword") == keyword:
             result = j.get("result") or {}
-            links_live = [any(f"{str(v.get('public')).split('//')[-1].split('/')[0]} 배포 완료" in line for line in j.get("log") or [])
-                          for v in result.values() if isinstance(v, dict) and v.get("public")]
+            links_live = [_deployed(v.get("public"), j.get("log")) for v in result.values() if isinstance(v, dict) and v.get("public")]
             errors = [line for line in j.get("log") or [] if "오류:" in line]
             site = {"state": j.get("state"), "job": j.get("id"),
                     # why it failed, in words: the run's error line without the time
@@ -113,7 +122,7 @@ def overview():
                     "redeploy": j.get("state") in ("실패", "중단", "완료") and bool(links_live) and not all(links_live),
                     # A post's address exists as soon as it is written, but opens only after its site's deploy.
                     "links": [{"site": site_name(v.get("public")), "title": v.get("title", k), "url": v.get("public"),
-                               "live": any(f"{str(v.get('public')).split('//')[-1].split('/')[0]} 배포 완료" in line for line in j.get("log") or [])}
+                               "live": _deployed(v.get("public"), j.get("log"))}
                               for k, v in sorted(result.items()) if isinstance(v, dict) and v.get("public")],
                     "last": (j.get("log") or [""])[-1] if j.get("log") else ""}
     qr = next((j["link"] for j in jobs if "site.naver.com" in str(j.get("link") or "")), "")
