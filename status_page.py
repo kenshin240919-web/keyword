@@ -306,12 +306,15 @@ def _video_state(flow, done, job, plan=None):
         return {"icon": "ok", "text": "영상 없이 저장"}
     if job and job.get("status") == "ready":
         # Before Flow, shot writes the video's script with Claude; when that failed, this said "Flow 차례 기다리는 중"
-        # for good while Flow sat idle (2026-11-09). shot tries again by itself (3 times, 10 minutes apart).
+        # for good while Flow sat idle (2026-11-09). shot tries again by itself (1, 3 and 10 minutes later).
         plan = plan or {}
         if plan.get("error"):
-            again = plan.get("tries", 1) < 3
+            tries = plan.get("tries", 1)
+            again = tries < 4  # shot tries again 1, 3 and 10 minutes later
+            wait = {1: "1분", 2: "3분"}.get(tries, "10분")
             return {"icon": "warn" if again else "err",
-                    "text": f"영상 대본 만들기 실패: {plan['error'][:150]}" + (" (10분 뒤 저절로 다시 시도)" if again else "")}
+                    "text": f"영상 대본 만들기 실패: {plan['error'][:150]}"
+                            + (f" ({wait} 뒤 저절로 다시 시도 · 바로 하려면 [영상 다시 만들기])" if again else "")}
         if not plan:
             return {"icon": "wait", "text": "영상 대본 만드는 중 (1~2분)"}
         return {"icon": "wait", "text": "Flow 차례 기다리는 중"}
