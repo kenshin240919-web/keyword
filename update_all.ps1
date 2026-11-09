@@ -28,20 +28,29 @@ $apps = @(
 $nodeDir = 'C:\Program Files\nodejs'
 if (Test-Path $nodeDir) { $env:PATH = "$nodeDir;$env:PATH" }
 
-function Get-ListenPid([int]$port) {
-    $found = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
-        Select-Object -First 1 -ExpandProperty OwningProcess
-    if ($found) { return $found }
-    # Get-NetTCPConnection found nothing on this PC while the programs were running, so nothing was restarted
-    # after an update (2026-11-09): netstat as a second way.
-    foreach ($line in (netstat -ano -p tcp)) {
-        if ($line -match "^\s*TCP\s+\S+:$port\s+\S+\s+(?:LISTENING|수신 대기)\s+(\d+)") { return [int]$Matches[1] }
+# Is a program on? Its port is listening. Which process is it? Its own command line: on this PC Windows names
+# process 0 as the owner of every listening port (2026-11-09), so a port never led to the program and updates,
+# 끄기 and 시작 all misjudged what was running.
+function Test-Port([int]$port) {
+    if (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) { return $true }
+    return [bool](netstat -ano -p tcp | Select-String -Pattern ":$port\s+\S+\s+(LISTENING|수신 대기)")
+}
+function Get-AppPids([string]$app) {
+    $procs = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine })
+    $found = switch ($app) {
+        'blogauto' { $procs | Where-Object { $_.Name -eq 'electron.exe' -and $_.CommandLine -notmatch '--type=' -and "$($_.ExecutablePath) $($_.CommandLine)" -match 'BlogAutomator' } }
+        'autopost' { $procs | Where-Object { $_.Name -like 'python*' -and $_.CommandLine -match 'app\.py' -and $_.CommandLine -match '--no-browser|autopost' } }
+        'report' { $procs | Where-Object { $_.Name -like 'python*' -and $_.CommandLine -match 'report_server\.py' -and $_.CommandLine -match '--serve' } }
+        'shot' {
+            $procs | Where-Object { $p = $_; $p.Name -like 'python*' -and $p.CommandLine -match 'app\.py' -and $p.CommandLine -notmatch '--no-browser|autopost' -and
+                ($p.CommandLine -match '\\shot\\' -or @($procs | Where-Object { $_.ProcessId -eq $p.ParentProcessId -and $_.CommandLine -match 'run_typecast' }).Count) }
+        }
     }
-    return $null
+    @($found | ForEach-Object { [int]$_.ProcessId })
 }
 
 function Wait-PortFree([int]$port) {
-    for ($i = 0; $i -lt 30 -and (Get-ListenPid $port); $i++) { Start-Sleep -Milliseconds 500 }
+    for ($i = 0; $i -lt 30 -and (Test-Port $port); $i++) { Start-Sleep -Milliseconds 500 }
 }
 
 # Ends the program and its console window (the cmd.exe that started it, when there is one).
@@ -67,9 +76,13 @@ function Invoke-Local([string]$method, [string]$url, [hashtable]$headers = @{}) 
 }
 
 function Restart-App($app, [string]$dir) {
-    $procId = Get-ListenPid $app.Port
-    # The report server and shot restart through their own address, so they do not need the process number.
-    if (-not $procId -and $app.Dir -notin @('key', 'shot')) { Say '  꺼져 있어서 다시 켤 필요가 없습니다 (다음에 켤 때 새 버전).'; return }
+    $running = Test-Port $app.Port
+    # The report server and shot restart through their own address; the other two are found by their command lines.
+    if (-not $running -and $app.Dir -notin @('key', 'shot')) { Say '  꺼져 있어서 다시 켤 필요가 없습니다 (다음에 켤 때 새 버전).'; return }
+    $ids = switch ($app.Dir) { 'BlogAutomator' { Get-AppPids 'blogauto' } 'move\autopost' { Get-AppPids 'autopost' } default { @() } }
+    if ($running -and $app.Dir -in @('BlogAutomator', 'move\autopost') -and -not $ids.Count) {
+        Say '  켜져 있는데 프로그램을 찾지 못해 다시 켜지 못했습니다. guidejung 끄기 → guidejung 시작을 해 주세요.' Yellow; $script:problems++; return
+    }
     switch ($app.Dir) {
         'key' {
             # The report server starts again (new code) the next time a report is opened.
@@ -79,6 +92,12 @@ function Restart-App($app, [string]$dir) {
                 Start-Sleep 1
                 Push-Location $dir; $env:PYTHONUTF8 = '1'; & python report_server.py --start; Pop-Location
                 Say '  guidejung 홈(리포트 서버)을 새 버전으로 다시 켰습니다. 홈 탭이 이상하면 새로 고침(F5) 해 주세요.' Green
+            } elseif ($running) {
+                # The shutdown call failed while it ran: end its process, then start the new version.
+                foreach ($id in (Get-AppPids 'report')) { taskkill /pid $id /t /f | Out-Null }
+                Start-Sleep 1
+                Push-Location $dir; $env:PYTHONUTF8 = '1'; & python report_server.py --start; Pop-Location
+                Say '  guidejung 홈(리포트 서버)을 새 버전으로 다시 켰습니다. 홈 탭에서 새로 고침(F5) 해 주세요.' Green
             } else { Say '  guidejung 홈(리포트 서버)이 꺼져 있어 다음에 켤 때 새 버전으로 켜집니다.' }
         }
         'BlogAutomator' {
@@ -86,7 +105,7 @@ function Restart-App($app, [string]$dir) {
             $busy = $r.ok -and ($r.data.generating -or @($r.data.jobs | Where-Object {
                 $_.styles -and @($_.styles.PSObject.Properties.Value | Where-Object { $_.status -eq 'running' }).Count }).Count)
             if ($busy) { Say '  글 작성·임시저장 중이라 다시 켜지 않았습니다. 끝난 뒤 업데이트.bat을 한 번 더 실행하세요.' Yellow; $script:problems++; return }
-            Stop-AppTree $procId
+            foreach ($id in $ids) { Stop-AppTree $id }
             Wait-PortFree $app.Port
             Start-Process -FilePath (Join-Path $dir '실행.bat') -WorkingDirectory $dir -WindowStyle Hidden
             Say '  BlogAutomator를 다시 켰습니다. 크롬 확장은 1분 안에 스스로 새로고침합니다.' Green
@@ -96,7 +115,7 @@ function Restart-App($app, [string]$dir) {
             if ($r.ok -and @($r.data.jobs | Where-Object { $_.state -eq '진행 중' }).Count) {
                 Say '  사이트 글 작성 중이라 다시 켜지 않았습니다. 끝난 뒤 업데이트.bat을 한 번 더 실행하세요.' Yellow; $script:problems++; return
             }
-            Stop-AppTree $procId
+            foreach ($id in $ids) { Stop-AppTree $id }
             Wait-PortFree $app.Port
             Start-Process -FilePath 'python' -ArgumentList 'app.py', '--no-browser' -WorkingDirectory $dir -WindowStyle Hidden
             Say '  autopost를 다시 켰습니다 (창 없이).' Green
@@ -106,7 +125,7 @@ function Restart-App($app, [string]$dir) {
             $r = Invoke-Local 'POST' 'http://127.0.0.1:8790/api/restart' @{ 'X-Shot-Update' = '1' }
             if ($r.ok) { Say '  shot을 다시 켰습니다 (입력한 키 그대로).' Green }
             elseif ($r.status -eq 409) { Say '  영상 제작 중이라 다시 켜지 않았습니다. 끝난 뒤 업데이트.bat을 한 번 더 실행하세요.' Yellow; $script:problems++ }
-            elseif (-not $procId) { Say '  꺼져 있어서 다시 켤 필요가 없습니다 (다음에 켤 때 새 버전).' }
+            elseif (-not $running) { Say '  꺼져 있어서 다시 켤 필요가 없습니다 (다음에 켤 때 새 버전).' }
             else { Say '  shot 창을 닫고 run_typecast.bat으로 직접 다시 켜 주세요 (이번 한 번만).' Yellow; $script:problems++ }
         }
     }

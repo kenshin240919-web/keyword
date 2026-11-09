@@ -5,15 +5,25 @@ $ErrorActionPreference = 'Continue'
 $base = Split-Path -Parent $PSScriptRoot
 
 function Say([string]$text, [string]$color = 'Gray') { Write-Host $text -ForegroundColor $color }
-function Get-ListenPid([int]$port) {
-    $found = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
-        Select-Object -First 1 -ExpandProperty OwningProcess
-    if ($found) { return $found }
-    # Get-NetTCPConnection found nothing on this PC while the programs were running (2026-11-09): netstat as a second way.
-    foreach ($line in (netstat -ano -p tcp)) {
-        if ($line -match "^\s*TCP\s+\S+:$port\s+\S+\s+(?:LISTENING|수신 대기)\s+(\d+)") { return [int]$Matches[1] }
+# Is a program on? Its port is listening. Which process is it? Its own command line: on this PC Windows names
+# process 0 as the owner of every listening port (2026-11-09), so a port never led to the program and updates,
+# 끄기 and 시작 all misjudged what was running.
+function Test-Port([int]$port) {
+    if (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) { return $true }
+    return [bool](netstat -ano -p tcp | Select-String -Pattern ":$port\s+\S+\s+(LISTENING|수신 대기)")
+}
+function Get-AppPids([string]$app) {
+    $procs = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine })
+    $found = switch ($app) {
+        'blogauto' { $procs | Where-Object { $_.Name -eq 'electron.exe' -and $_.CommandLine -notmatch '--type=' -and "$($_.ExecutablePath) $($_.CommandLine)" -match 'BlogAutomator' } }
+        'autopost' { $procs | Where-Object { $_.Name -like 'python*' -and $_.CommandLine -match 'app\.py' -and $_.CommandLine -match '--no-browser|autopost' } }
+        'report' { $procs | Where-Object { $_.Name -like 'python*' -and $_.CommandLine -match 'report_server\.py' -and $_.CommandLine -match '--serve' } }
+        'shot' {
+            $procs | Where-Object { $p = $_; $p.Name -like 'python*' -and $p.CommandLine -match 'app\.py' -and $p.CommandLine -notmatch '--no-browser|autopost' -and
+                ($p.CommandLine -match '\\shot\\' -or @($procs | Where-Object { $_.ProcessId -eq $p.ParentProcessId -and $_.CommandLine -match 'run_typecast' }).Count) }
+        }
     }
-    return $null
+    @($found | ForEach-Object { [int]$_.ProcessId })
 }
 # Ends the program with its children and the console that started it: a cmd window, or shot's run_typecast.ps1
 # loop (it would start shot again). Any other parent is left alone (its number may belong to another program now).
@@ -44,30 +54,32 @@ if ($busy.Count) {
     if ($answer -notmatch '^[Yy]') { Say '끄지 않았습니다.' Green; Start-Sleep 3; exit }
 }
 
-# Programs, by the port each one listens on.
-$apps = @(@{ Name = 'Blog Automator'; Port = 37321 }, @{ Name = 'autopost (사이트 글)'; Port = 8777 })
+# Programs, found by their command lines (all copies, e.g. a second shot that took port 8791).
+$apps = @(@{ Name = 'Blog Automator'; App = 'blogauto'; Port = 37321 }, @{ Name = 'autopost (사이트 글)'; App = 'autopost'; Port = 8777 },
+          @{ Name = 'shot (영상)'; App = 'shot'; Port = 8790 })
 foreach ($app in $apps) {
-    $procId = Get-ListenPid $app.Port
-    if ($procId) { Stop-AppTree $procId; Say "[$($app.Name)] 껐습니다." Green } else { Say "[$($app.Name)] 이미 꺼져 있음" }
+    $ids = Get-AppPids $app.App
+    if ($ids.Count) { foreach ($id in $ids) { Stop-AppTree $id }; Say "[$($app.Name)] 껐습니다." Green }
+    elseif (Test-Port $app.Port) { Say "[$($app.Name)] 켜져 있는데 찾지 못했습니다. 작업 관리자에서 직접 꺼 주세요." Yellow }
+    else { Say "[$($app.Name)] 이미 꺼져 있음" }
 }
-$shotOff = $true
-foreach ($port in 8790..8799) {
-    $procId = Get-ListenPid $port
-    if ($procId -and (Get-Process -Id $procId -ErrorAction SilentlyContinue).ProcessName -like 'python*') { Stop-AppTree $procId; $shotOff = $false }
-}
-Say $(if ($shotOff) { '[shot (영상)] 이미 꺼져 있음' } else { '[shot (영상)] 껐습니다.' }) $(if ($shotOff) { 'Gray' } else { 'Green' })
 
-# The report server (home page) stops through its own shutdown call.
+# The report server (home page): its own shutdown call, else its process (the call once failed while it ran).
+$homeOff = $false
 try {
     Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:8765/api/shutdown' -Headers @{ 'X-Report-App' = '1' } -Body '{}' -ContentType 'application/json' -TimeoutSec 5 | Out-Null
-    Say '[guidejung 홈 (리포트 서버)] 껐습니다.' Green
-} catch { Say '[guidejung 홈 (리포트 서버)] 이미 꺼져 있음' }
+    $homeOff = $true
+} catch { }
+$ids = Get-AppPids 'report'
+if ($ids.Count) { Start-Sleep 1; foreach ($id in (Get-AppPids 'report')) { taskkill /pid $id /t /f | Out-Null }; $homeOff = $true }
+Say $(if ($homeOff) { '[guidejung 홈 (리포트 서버)] 껐습니다.' } elseif (Test-Port 8765) { '[guidejung 홈 (리포트 서버)] 켜져 있는데 찾지 못했습니다.' } else { '[guidejung 홈 (리포트 서버)] 이미 꺼져 있음' }) $(if ($homeOff) { 'Green' } else { 'Gray' })
 
-# Only the dedicated Chromes (blog 1~4, Flow): the user's own Chrome stays open.
+# Only Chromes with their own profile folder (Flow, and blog 1~4 when started that way). Blog Chromes that are
+# profiles of the everyday Chrome stay open with it: closing them would close the user's own Chrome too.
 $chromes = @(Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" -ErrorAction SilentlyContinue |
     Where-Object { $_.CommandLine -match 'chrome-[1-4]["\\ ]|chrome-[1-4]$|chrome-flow' -and $_.CommandLine -notmatch '--type=' })
 foreach ($c in $chromes) { taskkill /pid $c.ProcessId /t /f | Out-Null }
-Say $(if ($chromes.Count) { "[블로그·Flow 크롬] $($chromes.Count)개 껐습니다." } else { '[블로그·Flow 크롬] 이미 꺼져 있음' }) $(if ($chromes.Count) { 'Green' } else { 'Gray' })
+Say $(if ($chromes.Count) { "[Flow·블로그 전용 크롬] $($chromes.Count)개 껐습니다." } else { '[Flow·블로그 전용 크롬] 이미 꺼져 있음 (평소 크롬 안의 블로그 프로필은 그대로 둠)' }) $(if ($chromes.Count) { 'Green' } else { 'Gray' })
 
 Say '=== 끝 — Local(워드프레스)은 그대로 켜 두었습니다. 다시 켤 때는 바탕화면 guidejung 시작. 이 창은 5초 뒤 닫힙니다. ===' Cyan
 Start-Sleep 5

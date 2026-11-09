@@ -7,17 +7,26 @@ $ErrorActionPreference = 'Continue'
 $base = Split-Path -Parent $PSScriptRoot
 
 function Say([string]$text, [string]$color = 'Gray') { Write-Host $text -ForegroundColor $color }
-function Get-ListenPid([int]$port) {
-    $found = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
-        Select-Object -First 1 -ExpandProperty OwningProcess
-    if ($found) { return $found }
-    # Get-NetTCPConnection found nothing on this PC while the programs were running (2026-11-09): netstat as a second way.
-    foreach ($line in (netstat -ano -p tcp)) {
-        if ($line -match "^\s*TCP\s+\S+:$port\s+\S+\s+(?:LISTENING|수신 대기)\s+(\d+)") { return [int]$Matches[1] }
-    }
-    return $null
+# Is a program on? Its port is listening. Which process is it? Its own command line: on this PC Windows names
+# process 0 as the owner of every listening port (2026-11-09), so a port never led to the program and updates,
+# 끄기 and 시작 all misjudged what was running.
+function Test-Port([int]$port) {
+    if (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) { return $true }
+    return [bool](netstat -ano -p tcp | Select-String -Pattern ":$port\s+\S+\s+(LISTENING|수신 대기)")
 }
-function Test-Port([int]$port) { [bool](Get-ListenPid $port) }
+function Get-AppPids([string]$app) {
+    $procs = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine })
+    $found = switch ($app) {
+        'blogauto' { $procs | Where-Object { $_.Name -eq 'electron.exe' -and $_.CommandLine -notmatch '--type=' -and "$($_.ExecutablePath) $($_.CommandLine)" -match 'BlogAutomator' } }
+        'autopost' { $procs | Where-Object { $_.Name -like 'python*' -and $_.CommandLine -match 'app\.py' -and $_.CommandLine -match '--no-browser|autopost' } }
+        'report' { $procs | Where-Object { $_.Name -like 'python*' -and $_.CommandLine -match 'report_server\.py' -and $_.CommandLine -match '--serve' } }
+        'shot' {
+            $procs | Where-Object { $p = $_; $p.Name -like 'python*' -and $p.CommandLine -match 'app\.py' -and $p.CommandLine -notmatch '--no-browser|autopost' -and
+                ($p.CommandLine -match '\\shot\\' -or @($procs | Where-Object { $_.ProcessId -eq $p.ParentProcessId -and $_.CommandLine -match 'run_typecast' }).Count) }
+        }
+    }
+    @($found | ForEach-Object { [int]$_.ProcessId })
+}
 function Wait-Port([int]$port, [int]$seconds) {
     for ($i = 0; $i -lt $seconds -and -not (Test-Port $port); $i++) { Start-Sleep 1 }
     Test-Port $port
