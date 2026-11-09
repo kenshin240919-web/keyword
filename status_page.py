@@ -315,8 +315,11 @@ def _video_state(flow, done, job, plan=None):
             return {"icon": "warn" if again else "err",
                     "text": f"영상 대본 만들기 실패: {plan['error'][:150]}"
                             + (f" ({wait} 뒤 저절로 다시 시도 · 바로 하려면 [영상 다시 만들기])" if again else "")}
+        if plan.get("planning"):
+            mins = int((time.time() - plan.get("at", time.time())) // 60)
+            return {"icon": "run" if mins < 10 else "warn", "text": f"영상 대본 만드는 중 ({mins}분째)" if mins else "영상 대본 만드는 중"}
         if not plan:
-            return {"icon": "wait", "text": "영상 대본 만드는 중 (1~2분)"}
+            return {"icon": "wait", "text": "영상 대본 차례 기다리는 중"}
         return {"icon": "wait", "text": "Flow 차례 기다리는 중"}
     return {"icon": "wait", "text": "-"}
 
