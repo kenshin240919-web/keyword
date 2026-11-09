@@ -65,6 +65,7 @@ def overview():
     flow = _get(f"{SHOT}/api/flow/status", {"X-Shot-Flow": "1"})
     flow_poll = _get(f"{SHOT}/api/flow/poll-info", {"X-Shot-Flow": "1"}) or {}
     shot_latest = _get(f"{SHOT}/api/blogauto-auto/latest")
+    plans = {r["job"]: r for r in (_get(f"{SHOT}/api/blogauto-auto") or []) if isinstance(r, dict) and r.get("job")}
     auto = _get(f"{AUTOPOST}/api/state")
     now = time.time()
 
@@ -96,9 +97,10 @@ def overview():
         st = (job or {}).get("styles", {}).get(str(n)) or {}
         f, d = flows.get(n) or {}, done.get(n) or {}
         rows.append({
-            "blog": n, "job": (job or {}).get("id", ""), "keyword": (job or {}).get("keyword", ""), "actions": _actions(job, st, f),
+            "blog": n, "job": (job or {}).get("id", ""), "keyword": (job or {}).get("keyword", ""),
+            "actions": _actions(job, st, f, plans.get((job or {}).get("id"), {})),
             "write": _write_state(job),
-            "video": _video_state(f, d, job),
+            "video": _video_state(f, d, job, plans.get((job or {}).get("id"), {})),
             "link": _link_state(job, (blog or {}).get("qrTasks") or [], (blog or {}).get("config", {}).get("qrBlog") or 1,
                                 (blog or {}).get("qrCheck")),
             "naver": _naver_state(st, job),
@@ -179,7 +181,7 @@ def _write_state(job):
 IS_QR = ("site.naver.com", "naver.me")
 
 
-def _actions(job, st, flow):
+def _actions(job, st, flow, plan=None):
     """Buttons for this blog's row: {column: [{label, act, ...}]} (handled by POST /api/action)."""
     if not job:
         return {}
@@ -188,6 +190,8 @@ def _actions(job, st, flow):
         out["write"].append({"label": "다시 쓰기", "act": "rewrite", "job": job["id"]})
     if flow.get("status") == "error" and flow.get("pid"):
         out["video"].append({"label": "영상 다시 만들기", "act": "flow_retry", "pid": flow["pid"]})
+    elif (plan or {}).get("error") and not flow.get("status"):
+        out["video"].append({"label": "영상 다시 만들기", "act": "plan_retry", "job": job["id"]})
     status = st.get("status")
     if status == "video":
         out["video"].append({"label": "영상 없이 저장", "act": "skip_video", "job": job["id"]})
@@ -212,6 +216,9 @@ def act(body):
         _post(f"{SHOT}/api/flow/{_id(body.get('pid'))}/retry", {}, {"X-Shot-Flow": "1"})
         return "영상을 다시 만듭니다 (Flow, 실패하면 1번 더 시도)."
     job = _id(body.get("job"))
+    if kind == "plan_retry":  # the video's script failed before Flow: shot writes it again within a minute
+        _post(f"{SHOT}/api/blogauto-auto/{job}/retry", {}, {"X-Shot-Flow": "1"})
+        return "영상 대본을 다시 만듭니다 (1~2분 뒤 Flow로 넘어감)."
     if kind == "rewrite":
         _post(f"{BLOGAUTO}/api/jobs/{job}/rewrite", {})
         return "글을 다시 씁니다."
@@ -284,7 +291,7 @@ def _link_state(job, qr_tasks, qr_blog, qr_check=None):
     return {"icon": "warn" if note else "wait", "text": note or "-"}
 
 
-def _video_state(flow, done, job):
+def _video_state(flow, done, job, plan=None):
     via = f" ({flow['engine']})" if flow.get("engine") else ""
     if done.get("done"):
         return {"icon": "ok", "text": f"완성{via}"}
@@ -298,6 +305,15 @@ def _video_state(flow, done, job):
     if status == "skipped":
         return {"icon": "ok", "text": "영상 없이 저장"}
     if job and job.get("status") == "ready":
+        # Before Flow, shot writes the video's script with Claude; when that failed, this said "Flow 차례 기다리는 중"
+        # for good while Flow sat idle (2026-11-09). shot tries again by itself (3 times, 10 minutes apart).
+        plan = plan or {}
+        if plan.get("error"):
+            again = plan.get("tries", 1) < 3
+            return {"icon": "warn" if again else "err",
+                    "text": f"영상 대본 만들기 실패: {plan['error'][:150]}" + (" (10분 뒤 저절로 다시 시도)" if again else "")}
+        if not plan:
+            return {"icon": "wait", "text": "영상 대본 만드는 중 (1~2분)"}
         return {"icon": "wait", "text": "Flow 차례 기다리는 중"}
     return {"icon": "wait", "text": "-"}
 
