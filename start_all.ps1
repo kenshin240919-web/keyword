@@ -7,7 +7,17 @@ $ErrorActionPreference = 'Continue'
 $base = Split-Path -Parent $PSScriptRoot
 
 function Say([string]$text, [string]$color = 'Gray') { Write-Host $text -ForegroundColor $color }
-function Test-Port([int]$port) { [bool](Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) }
+function Get-ListenPid([int]$port) {
+    $found = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
+        Select-Object -First 1 -ExpandProperty OwningProcess
+    if ($found) { return $found }
+    # Get-NetTCPConnection found nothing on this PC while the programs were running (2026-11-09): netstat as a second way.
+    foreach ($line in (netstat -ano -p tcp)) {
+        if ($line -match "^\s*TCP\s+\S+:$port\s+\S+\s+(?:LISTENING|수신 대기)\s+(\d+)") { return [int]$Matches[1] }
+    }
+    return $null
+}
+function Test-Port([int]$port) { [bool](Get-ListenPid $port) }
 function Wait-Port([int]$port, [int]$seconds) {
     for ($i = 0; $i -lt $seconds -and -not (Test-Port $port); $i++) { Start-Sleep 1 }
     Test-Port $port

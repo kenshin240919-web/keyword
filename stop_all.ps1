@@ -6,7 +6,14 @@ $base = Split-Path -Parent $PSScriptRoot
 
 function Say([string]$text, [string]$color = 'Gray') { Write-Host $text -ForegroundColor $color }
 function Get-ListenPid([int]$port) {
-    Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess
+    $found = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
+        Select-Object -First 1 -ExpandProperty OwningProcess
+    if ($found) { return $found }
+    # Get-NetTCPConnection found nothing on this PC while the programs were running (2026-11-09): netstat as a second way.
+    foreach ($line in (netstat -ano -p tcp)) {
+        if ($line -match "^\s*TCP\s+\S+:$port\s+\S+\s+(?:LISTENING|수신 대기)\s+(\d+)") { return [int]$Matches[1] }
+    }
+    return $null
 }
 # Ends the program with its children and the console that started it: a cmd window, or shot's run_typecast.ps1
 # loop (it would start shot again). Any other parent is left alone (its number may belong to another program now).

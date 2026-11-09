@@ -29,8 +29,15 @@ $nodeDir = 'C:\Program Files\nodejs'
 if (Test-Path $nodeDir) { $env:PATH = "$nodeDir;$env:PATH" }
 
 function Get-ListenPid([int]$port) {
-    Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
+    $found = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
         Select-Object -First 1 -ExpandProperty OwningProcess
+    if ($found) { return $found }
+    # Get-NetTCPConnection found nothing on this PC while the programs were running, so nothing was restarted
+    # after an update (2026-11-09): netstat as a second way.
+    foreach ($line in (netstat -ano -p tcp)) {
+        if ($line -match "^\s*TCP\s+\S+:$port\s+\S+\s+(?:LISTENING|수신 대기)\s+(\d+)") { return [int]$Matches[1] }
+    }
+    return $null
 }
 
 function Wait-PortFree([int]$port) {
@@ -61,7 +68,8 @@ function Invoke-Local([string]$method, [string]$url, [hashtable]$headers = @{}) 
 
 function Restart-App($app, [string]$dir) {
     $procId = Get-ListenPid $app.Port
-    if (-not $procId) { return }
+    # The report server and shot restart through their own address, so they do not need the process number.
+    if (-not $procId -and $app.Dir -notin @('key', 'shot')) { Say '  꺼져 있어서 다시 켤 필요가 없습니다 (다음에 켤 때 새 버전).'; return }
     switch ($app.Dir) {
         'key' {
             # The report server starts again (new code) the next time a report is opened.
@@ -71,7 +79,7 @@ function Restart-App($app, [string]$dir) {
                 Start-Sleep 1
                 Push-Location $dir; $env:PYTHONUTF8 = '1'; & python report_server.py --start; Pop-Location
                 Say '  guidejung 홈(리포트 서버)을 새 버전으로 다시 켰습니다. 홈 탭이 이상하면 새로 고침(F5) 해 주세요.' Green
-            }
+            } else { Say '  guidejung 홈(리포트 서버)이 꺼져 있어 다음에 켤 때 새 버전으로 켜집니다.' }
         }
         'BlogAutomator' {
             $r = Invoke-Local 'GET' 'http://127.0.0.1:37321/api/status' @{ 'X-Blogauto' = '1' }
@@ -98,6 +106,7 @@ function Restart-App($app, [string]$dir) {
             $r = Invoke-Local 'POST' 'http://127.0.0.1:8790/api/restart' @{ 'X-Shot-Update' = '1' }
             if ($r.ok) { Say '  shot을 다시 켰습니다 (입력한 키 그대로).' Green }
             elseif ($r.status -eq 409) { Say '  영상 제작 중이라 다시 켜지 않았습니다. 끝난 뒤 업데이트.bat을 한 번 더 실행하세요.' Yellow; $script:problems++ }
+            elseif (-not $procId) { Say '  꺼져 있어서 다시 켤 필요가 없습니다 (다음에 켤 때 새 버전).' }
             else { Say '  shot 창을 닫고 run_typecast.bat으로 직접 다시 켜 주세요 (이번 한 번만).' Yellow; $script:problems++ }
         }
     }
