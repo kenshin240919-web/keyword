@@ -297,11 +297,16 @@ def _video_state(flow, done, job, plan=None):
         return {"icon": "ok", "text": f"완성{via}"}
     status = flow.get("status")
     if status == "running":
+        # The Flow extension reports every few seconds while it works; silence means it stopped somewhere.
+        quiet = time.time() - (flow.get("at") or time.time())
+        if quiet > 180:
+            return {"icon": "warn", "text": f"Flow가 {int(quiet // 60)}분째 소식 없음 · 마지막 단계: {flow.get('step') or '-'} "
+                                            "→ Flow 크롬에서 그 탭을 확인해 주세요"}
         return {"icon": "run", "text": flow.get("step") or "Flow 생성 중"}
     if status == "done":
         return {"icon": "run", "text": f"자막·내레이션 입히는 중{via}"}
     if status == "error":
-        return {"icon": "err", "text": flow.get("error") or "Flow 실패 (확장 패널에서 다시 시도)"}
+        return {"icon": "err", "text": "Flow 실패: " + (flow.get("error") or "이유를 받지 못함 (Flow 확장 패널의 진행 기록 확인)")[:300]}
     if status == "skipped":
         return {"icon": "ok", "text": "영상 없이 저장"}
     if job and job.get("status") == "ready":
