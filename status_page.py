@@ -82,8 +82,7 @@ def overview():
         programs.append({"name": f"블로그 크롬 {n}번", "ok": last is not None and now - last < ALIVE_SECONDS,
                          "fix": f"D:\\guidejung\\바로가기 폴더의 '블로그 {n}번'"})
     last_flow = flow_poll.get("last_poll")
-    used = f" · 오늘 영상 {flow_poll['today']}/{flow_poll['daily_max']}개" if "today" in flow_poll else ""  # Flow credit guard
-    programs.append({"name": f"Flow 크롬{used}", "ok": bool(last_flow) and now - last_flow < ALIVE_SECONDS,
+    programs.append({"name": "Flow 크롬", "ok": bool(last_flow) and now - last_flow < ALIVE_SECONDS,
                      "fix": "D:\\guidejung\\바로가기 폴더의 'Flow 영상 크롬' (Shot Flow 확장 · 자동 생성 켜기)"})
 
     # Latest keyword sent from the report: the newest Blog Automator jobs that carry ctaKeyword.
