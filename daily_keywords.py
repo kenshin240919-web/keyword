@@ -7,6 +7,8 @@
     python daily_keywords.py --unwritten 궁합 # 잘못 기록한 키워드 취소
     python daily_keywords.py --skip-if-done  # 오늘 리포트가 이미 있으면 건너뜀 (자동 실행용)
     python daily_keywords.py --refresh       # 오늘 결과를 버리고 새로 뽑기 (같은 날 재실행은 첫 결과 유지)
+    python daily_keywords.py --profile life  # life.guidejung.com용: seeds_life.txt + 경쟁 사이트 RSS 씨앗,
+                                             # 기록 history_life.db, 결과 reports/life/날짜.json·.html (위 옵션 모두 함께 사용)
 
 흐름: seeds.txt → 연관 키워드(검색광고) → 작년 시즌 검색수 추정(데이터랩) → 1차 필터
       → 블로그 문서 수(검색 API) → 점수 → reports/날짜.html, .csv + history.db 기록
@@ -26,6 +28,7 @@ import sys
 import time
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -63,6 +66,29 @@ DEFAULT_CONFIG = {
 }
 TELEGRAM_KEYS = ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID")
 
+# 프로필: 계산은 같고 씨앗·기록·리포트 위치만 다릅니다. 기본은 blog (위 경로 그대로).
+# life는 블로그로 보냈거나 쓴 키워드(guidejung·gov에도 올라감)를 빼고 뽑아 내 사이트끼리 겹치지 않게 합니다.
+# config.json의 "life": {...} 로 life 설정만 따로 바꿀 수 있습니다.
+PROFILES = {
+    "life": {"seeds": "seeds_life.txt", "db": "history_life.db", "reports": "reports/life",
+             # banned_words: 글 한 편으로 답할 수 없는 실시간 값(시세·환율·날씨 당일)과 개별 투자상품(ETF 이름·티커).
+             # 대소문자 구분하는 부분 일치. '선물'은 선물세트도 걸려서 '선물지수'처럼 좁게 씁니다.
+             "config": {"top_n": 15, "open_report": False, "banned_words": [
+                 "실시간", "시세", "오늘", "내일", "주간날씨", "환율", "주가", "당첨번호", "비트코인",
+                 "인버스", "레버리지", "선물지수", "KODEX", "TIGER", "ACE", "RISE", "SOL", "KBSTAR", "HANARO",
+                 "ARIRANG", "VOO", "QQQ", "SCHD", "SPY", "SOXL", "JEPI"]},
+             "rss": ["https://weezzle.co.kr/rss"]},
+}
+PROFILE = "blog"
+BLOG_DB_PATH = DB_PATH
+
+
+def use_profile(name):
+    global PROFILE, SEEDS_PATH, DB_PATH, REPORT_DIR
+    p = PROFILES[name]
+    PROFILE = name
+    SEEDS_PATH, DB_PATH, REPORT_DIR = BASE_DIR / p["seeds"], BASE_DIR / p["db"], BASE_DIR / p["reports"]
+
 
 LOG_SINK = None  # the report server's 직접 뽑기 page reads the progress lines through this
 # Exists while today's report is being made; touched on every log line. The guidejung home shows "뽑는 중" only
@@ -90,20 +116,75 @@ def load_config():
         user = json.loads(CONFIG_PATH.read_text(encoding="utf-8-sig"))
         config.update({k: v for k, v in user.items() if k != "weights"})
         config["weights"].update(user.get("weights", {}))
+    else:
+        user = {}
+    if PROFILE in PROFILES:
+        config.update(PROFILES[PROFILE]["config"])
+        config.update(user.get(PROFILE, {}))
     return config
 
 
-def load_seeds():
+def parse_seeds(text, month):
+    """한 줄에 하나. '#@11' 같은 줄 아래 씨앗은 그 달과 전달에만 씁니다(이번 달·다음 달 시즌). 그 앞은 매일."""
+    seeds, section, keep = [], None, {month, month % 12 + 1}
+    for line in text.splitlines():
+        m = re.match(r"\s*#@(\d{1,2})\s*$", line)
+        if m:
+            section = int(m.group(1))
+            continue
+        word = "".join(line.split("#", 1)[0].split())
+        if word and word not in seeds and (section is None or section in keep):
+            seeds.append(word)
+    return seeds
+
+
+def rss_title_seed(title):
+    """'결혼자금 증여세, 1억5천만원 공제…' → '결혼자금증여세' (쉼표 앞부분, 한글·영문·숫자만). 너무 짧거나 길면 None."""
+    word = re.sub(r"[^0-9A-Za-z가-힣]", "", title.split(",")[0])
+    return word if 2 <= len(word) <= 20 else None
+
+
+def rss_seeds(urls):
+    """경쟁 사이트 RSS 글 제목을 씨앗으로. 글 내용은 쓰지 않고, 쓸지 말지는 검색량·경쟁으로 정합니다. 실패하면 건너뜀."""
+    seeds = []
+    for url in urls:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                root = ET.fromstring(r.read())
+        except Exception as e:  # network, HTTP or XML error: the fixed seeds still run
+            log(f"  [건너뜀] RSS {url}: {e}")
+            continue
+        for item in root.iter("item"):
+            word = rss_title_seed(item.findtext("title") or "")
+            if word and word not in seeds:
+                seeds.append(word)
+    return seeds
+
+
+def load_seeds(today=None):
     if not SEEDS_PATH.exists():
         sys.exit(f"[오류] 씨앗 키워드 파일이 없습니다: {SEEDS_PATH}")
-    seeds = []
-    for line in SEEDS_PATH.read_text(encoding="utf-8-sig").splitlines():
-        word = "".join(line.split("#", 1)[0].split())
-        if word and word not in seeds:
-            seeds.append(word)
+    seeds = parse_seeds(SEEDS_PATH.read_text(encoding="utf-8-sig"), (today or date.today()).month)
+    if PROFILE in PROFILES:
+        extra = [s for s in rss_seeds(PROFILES[PROFILE]["rss"]) if s not in seeds]
+        log(f"  RSS 씨앗 {len(extra)}개 추가")
+        seeds += extra
     if not seeds:
-        sys.exit("[오류] seeds.txt에 씨앗 키워드를 한 줄에 하나씩 넣어 주세요.")
+        sys.exit(f"[오류] {SEEDS_PATH.name}에 씨앗 키워드를 한 줄에 하나씩 넣어 주세요.")
     return seeds
+
+
+def blog_done():
+    """life: 블로그로 보냈거나 쓴 키워드 (history.db). 읽지 못하면 빈 집합."""
+    try:
+        db = sqlite3.connect(BLOG_DB_PATH)
+        try:
+            return {normalize(r[0]).upper() for r in db.execute("SELECT keyword FROM sent UNION SELECT keyword FROM written")}
+        finally:
+            db.close()
+    except sqlite3.Error:
+        return set()
 
 
 def with_retry(func, *args, tries=3, wait=1.0):
@@ -740,6 +821,8 @@ def run(today=None, refresh=False, seeds=None, period=None, open_browser=True):
     banned = [b for b in config["banned_words"] if b]
     # 직접 뽑기는 다른 블로그용이라 매일 리포트의 추천·작성 기록과 상관없이 모두 보여 줍니다.
     skip = set() if custom else excluded_keywords(db, today, config["exclude_recent_days"])
+    if PROFILE in PROFILES and not custom:
+        skip |= blog_done()
     scan = sorted(
         ((kw, vol) for kw, (vol, _) in found.items()
          if vol >= config["min_now_volume"] and normalize(kw).upper() not in skip and not any(b in kw for b in banned)),
@@ -775,7 +858,7 @@ def run(today=None, refresh=False, seeds=None, period=None, open_browser=True):
     log("5/5 리포트 저장")
     if custom:
         return publish_custom(top, today, len(rows), config, period, seeds, open_browser)
-    REPORT_DIR.mkdir(exist_ok=True)
+    REPORT_DIR.mkdir(parents=True, exist_ok=True)
     result_path.write_text(json.dumps({"top": top, "candidates": len(rows), "period": period},
                                       ensure_ascii=False, indent=1),
                            encoding="utf-8")
@@ -788,7 +871,7 @@ def run(today=None, refresh=False, seeds=None, period=None, open_browser=True):
     db.commit()
 
     publish(top, today, len(rows), config, period)
-    if all(keys.get(k) for k in TELEGRAM_KEYS):
+    if PROFILE == "blog" and all(keys.get(k) for k in TELEGRAM_KEYS):
         send_telegram(top, today.isoformat(), keys)
 
 
@@ -807,7 +890,9 @@ def publish(top, today, candidates, config, period=None):
     musts = pick_must([r for r in top if normalize(r["keyword"]) not in done], config["must_n"])
     html_path = REPORT_DIR / f"{today.isoformat()}.html"
     csv_path = REPORT_DIR / f"{today.isoformat()}.csv"
-    write_html(top, html_path, today.isoformat(), {"candidates": candidates, "period": period})
+    # life 리포트는 보기용: '블로그 4곳에 보내기'·'오늘 썼어요' 버튼 없음 (life 예약 작업이 .json을 읽고 --written으로 기록)
+    write_html(top, html_path, today.isoformat(), {"candidates": candidates, "period": period},
+               buttons=PROFILE == "blog")
     write_csv(top, csv_path)
 
     print(f"\n★ 오늘 꼭 쓸 키워드 {len(musts)}개")
@@ -862,7 +947,11 @@ def main():
     parser.add_argument("--skip-if-done", action="store_true", help="오늘 리포트가 이미 있으면 실행하지 않음")
     parser.add_argument("--refresh", action="store_true", help="오늘 결과를 버리고 새로 뽑기")
     parser.add_argument("--seeds", nargs="*", metavar="씨앗", help="직접 뽑기: 이 씨앗 키워드로 따로 뽑기 (쉼표로 구분, 비우면 물어봄)")
+    parser.add_argument("--profile", choices=["blog", *PROFILES], default="blog",
+                        help="blog(기본): seeds.txt·history.db·reports / life: seeds_life.txt·history_life.db·reports/life")
     args = parser.parse_args()
+    if args.profile != "blog":
+        use_profile(args.profile)
     if args.seeds is not None:
         text = " ".join(args.seeds) or input("씨앗 키워드를 쉼표로 구분해 입력하세요 (예: 청년지원금, 전세대출): ")
         seeds = [s.strip() for s in re.split(r"[,\n]", text) if s.strip()]
@@ -875,6 +964,8 @@ def main():
         unmark_written(args.unwritten)
     elif args.skip_if_done and (REPORT_DIR / f"{date.today().isoformat()}.html").exists():
         log("오늘 리포트가 이미 있어 건너뜁니다.")
+    elif PROFILE != "blog":  # the "뽑는 중" marker belongs to the blog report the home page shows
+        run(refresh=args.refresh)
     else:
         global _making
         RUNNING_FILE.parent.mkdir(exist_ok=True)

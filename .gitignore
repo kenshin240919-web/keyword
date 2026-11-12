@@ -3,5 +3,6 @@ __pycache__/
 reports/
 logs/
 history.db
+history_life.db
 thumbnail/
 thumbnails/
