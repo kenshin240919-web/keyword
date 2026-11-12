@@ -13,6 +13,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime
+from pathlib import Path
 
 import daily_keywords as dk
 
@@ -195,6 +197,9 @@ def _actions(job, st, flow, plan=None):
         out["write"].append({"label": "다시 쓰기", "act": "rewrite", "job": job["id"]})
     if flow.get("status") == "error" and flow.get("pid"):
         out["video"].append({"label": "영상 다시 만들기", "act": "flow_retry", "pid": flow["pid"]})
+    # The video is in Flow but did not come back: put the one downloaded from the Flow tab in (2026-11-12).
+    if flow.get("pid") and flow.get("status") in ("error", "running"):
+        out["video"].append({"label": "받은 영상 넣기", "act": "flow_file", "pid": flow["pid"], "slot": job.get("style"), "ask": "file"})
     elif (plan or {}).get("error") and not flow.get("status"):
         out["video"].append({"label": "영상 다시 만들기", "act": "plan_retry", "job": job["id"]})
     status = st.get("status")
@@ -217,6 +222,18 @@ def act(body):
     if kind == "redeploy":  # 사이트 발행 칸: deploy a written run again (autopost), gov first
         _post(f"{AUTOPOST}/api/jobs/redeploy", {"id": _id(body.get("id"))})
         return "사이트 배포를 다시 합니다 (gov 먼저, 끝나면 네이버 글에 주소 전달)."
+    if kind == "flow_file":  # 영상 칸 [받은 영상 넣기]: the newest .mp4 in Downloads → this blog's video
+        pid = _id(body.get("pid"))
+        downloads = Path.home() / "Downloads"
+        videos = sorted((f for f in downloads.glob("*.mp4") if time.time() - f.stat().st_mtime < 12 * 3600),
+                        key=lambda f: f.stat().st_mtime, reverse=True)
+        if not videos:
+            raise ValueError("다운로드 폴더에 최근 12시간 안에 받은 영상(mp4)이 없습니다. Flow 탭에서 그 영상의 [다운로드]를 먼저 눌러 주세요.")
+        video = videos[0]
+        if body.get("preview"):
+            return f"블로그 {body.get('slot') or ''}번에 넣을 영상: {video.name} ({datetime.fromtimestamp(video.stat().st_mtime):%H:%M} 받음)"
+        _post(f"{SHOT}/api/flow/{pid}/done", {"path": str(video), "engine": "Flow"}, {"X-Shot-Flow": "1"})
+        return "영상을 넣었습니다 → 자막 입히고 임시저장으로 이어집니다."
     if kind == "flow_retry":
         _post(f"{SHOT}/api/flow/{_id(body.get('pid'))}/retry", {}, {"X-Shot-Flow": "1"})
         return "영상을 다시 만듭니다 (Flow, 실패하면 1번 더 시도)."
@@ -471,6 +488,14 @@ async function runAct(e) {
   if (!e.target.dataset.act) return;
   const a = JSON.parse(e.target.dataset.act);
   if (a.confirm && !confirm('이 블로그 글을 처음부터 다시 써서 임시저장합니다.\\n이상하게 들어간 예전 임시저장 글은 네이버에서 직접 지워 주세요. 다시 시작할까요?')) return;
+  if (a.ask === 'file') {  // 받은 영상 넣기: show which downloaded file first
+    try {
+      const r = await fetch('/api/action', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Report-App': '1' }, body: JSON.stringify({ ...a, preview: true }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || r.status);
+      if (!confirm(d.message + '\\n(다운로드 폴더에서 가장 최근에 받은 영상)\\n\\n이 영상을 넣을까요?')) return;
+    } catch (err) { alert(err.message); return; }
+  }
   e.target.disabled = true; e.target.textContent = '요청 중…';
   try {
     const r = await fetch('/api/action', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Report-App': '1' }, body: JSON.stringify(a) });
