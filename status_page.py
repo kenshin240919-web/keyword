@@ -82,8 +82,13 @@ def overview():
         programs.append({"name": f"블로그 크롬 {n}번", "ok": last is not None and now - last < ALIVE_SECONDS,
                          "fix": f"D:\\guidejung\\바로가기 폴더의 '블로그 {n}번'"})
     last_flow = flow_poll.get("last_poll")
-    programs.append({"name": "Flow 크롬", "ok": bool(last_flow) and now - last_flow < ALIVE_SECONDS,
-                     "fix": "D:\\guidejung\\바로가기 폴더의 'Flow 영상 크롬' (Shot Flow 확장 · 자동 생성 켜기)"})
+    code, disk = flow_poll.get("client_code") or "", flow_poll.get("disk_version") or ""
+    if code and disk and code != disk:  # old extension code still running: shot gives it no videos
+        programs.append({"name": f"Flow 크롬 (확장이 예전 코드 {code})", "ok": False,
+                         "fix": f"Flow 크롬 창을 모두 닫고 바로가기로 다시 켜 주세요 (새 버전 v{disk}). 그 전까지 영상을 맡기지 않습니다"})
+    else:
+        programs.append({"name": "Flow 크롬", "ok": bool(last_flow) and now - last_flow < ALIVE_SECONDS,
+                         "fix": "D:\\guidejung\\바로가기 폴더의 'Flow 영상 크롬' (Shot Flow 확장 · 자동 생성 켜기)"})
 
     # Latest keyword sent from the report: the newest Blog Automator jobs that carry ctaKeyword.
     jobs = [j for j in (blog or {}).get("jobs", []) if j.get("ctaKeyword")]
