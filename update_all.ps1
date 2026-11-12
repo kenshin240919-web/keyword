@@ -240,5 +240,24 @@ elseif (-not (Test-Path $flowShortcut)) {
     if (Set-Shortcut $flowShortcut $chromePath $flowArgs) { Say "$tools 폴더에 'Flow 영상 크롬' 바로가기를 만들었습니다." }
 }
 
+# Seeds changed after today's keywords were made: make them again now, not tomorrow (2026-11-12). Compared by
+# file times, so it also works when this script was itself updated and runs a second time.
+$keyDir = Join-Path $base 'key'
+$today = Get-Date -Format 'yyyy-MM-dd'
+$report = Join-Path $keyDir "reports\$today.html"
+$seedFile = Join-Path $keyDir 'seeds.txt'
+if ((Test-Path $report) -and (Test-Path $seedFile) -and (Get-Item $seedFile).LastWriteTime -gt (Get-Item $report).LastWriteTime) {
+    foreach ($ext in 'html', 'json', 'csv') { Remove-Item -LiteralPath (Join-Path $keyDir "reports\$today.$ext") -ErrorAction SilentlyContinue }
+    if ($Startup) {
+        Say '씨앗 키워드가 바뀌어 오늘 키워드를 새로 뽑습니다 (이어서 자동 실행).' Green  # run_daily.bat makes it right after
+    } else {
+        $env:GUIDEJUNG_NO_BROWSER = '1'; $env:PYTHONUTF8 = '1'
+        Start-Process -FilePath 'cmd.exe' -WorkingDirectory $keyDir -WindowStyle Hidden `
+            -ArgumentList '/c', 'if not exist logs mkdir logs & python daily_keywords.py --skip-if-done >> logs\daily.log 2>&1'
+        Remove-Item Env:GUIDEJUNG_NO_BROWSER -ErrorAction SilentlyContinue
+        Say '씨앗 키워드가 바뀌어 오늘 키워드를 새로 뽑습니다 (몇 분 · 홈의 오늘 키워드 탭에서 진행을 볼 수 있음).' Green
+    }
+}
+
 if ($problems) { Say "=== 끝 (확인할 것 $problems 건, 위 노란색·빨간색 줄) ===" Yellow }
 else { Say '=== 끝 (모두 정상) ===' Green }
