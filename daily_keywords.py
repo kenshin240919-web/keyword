@@ -187,7 +187,7 @@ def blog_done():
         return set()
 
 
-def with_retry(func, *args, tries=3, wait=1.0):
+def with_retry(func, *args, tries=4, wait=2.0):  # 데이터랩이 자주 일시 오류(500)를 내서 4번까지, 2·4·6초 쉬며 (2026-11-16)
     for attempt in range(1, tries + 1):
         try:
             return func(*args)
