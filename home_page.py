@@ -31,7 +31,8 @@ iframe, .pane { position:absolute; inset:0; width:100%; height:100%; border:0; b
 .box { max-width:760px; margin:0 auto; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:22px 24px; line-height:1.7; }
 .box h2 { margin:0 0 10px; font-size:19px; }
 .box button { font:inherit; padding:6px 14px; border-radius:8px; border:1px solid #2b6cb0; background:#2b6cb0; color:#fff; cursor:pointer; margin-right:10px; }
-.box pre { background:#f7f8fa; border:1px solid var(--line); border-radius:8px; padding:10px; font-size:12px; white-space:pre-wrap; max-height:260px; overflow:auto; }
+.box pre { background:#f7f8fa; border:1px solid var(--line); border-radius:8px; padding:10px; font-size:12px; white-space:pre-wrap; height:calc(100vh - 330px); min-height:200px; overflow:auto; margin:0; }
+.box.wide { max-width:1100px; }
 .box table { border-collapse:collapse; width:100%; font-size:14px; }
 .box td { border-top:1px solid var(--line); padding:8px 6px; vertical-align:top; }
 .box td:first-child { white-space:nowrap; font-weight:bold; width:120px; }
@@ -85,13 +86,32 @@ async function reportPane() {
   const d = await fetch('/api/today', { cache: 'no-store' }).then(r => r.json()).catch(() => ({}));
   if (d.report) return frame('/reports/' + encodeURIComponent(d.report));
   const p = box('<div id="todaybox"></div>');
+  p.firstChild.classList.add('wide');
+  // The heading changes only when running/not-running flips; the log box is kept and only its text is updated,
+  // so a scrolled position stays (it jumped back every 5 seconds, 2026-11-17). It follows new lines only while
+  // it is scrolled to the bottom.
+  let shownRunning = null;
   const render = n => {
-    const older = n.latest ? ' <a href="/reports/' + encodeURIComponent(n.latest) + '" target="_blank">지난 리포트 보기 (' + esc(n.latest.replace('.html', '')) + ')</a>' : '';
-    p.querySelector('#todaybox').innerHTML = n.running
-      ? '<h2>오늘 키워드를 뽑는 중입니다</h2><p>몇 분 걸립니다. 다 되면 이 탭에 저절로 나옵니다. 아래 기록이 계속 늘어나면 진행 중입니다.</p><pre>' + esc(n.log || '') + '</pre>'
-      : '<h2>오늘 키워드가 아직 없습니다</h2><p>지금 뽑고 있지도 않습니다. <button id="make">지금 뽑기</button>' + older + '</p><p style="color:#667085">몇 분 걸리고, 다 되면 이 탭에 저절로 나옵니다.</p><pre>' + esc(n.log || '') + '</pre>';
-    const b = p.querySelector('#make');
-    if (b) b.onclick = make;
+    const box = p.querySelector('#todaybox');
+    if (shownRunning !== !!n.running) {
+      shownRunning = !!n.running;
+      const older = n.latest ? ' <a href="/reports/' + encodeURIComponent(n.latest) + '" target="_blank">지난 리포트 보기 (' + esc(n.latest.replace('.html', '')) + ')</a>' : '';
+      box.innerHTML = (n.running
+        ? '<h2>오늘 키워드를 뽑는 중입니다</h2><p>몇 분 걸립니다. 다 되면 이 탭에 저절로 나옵니다. 아래 기록이 계속 늘어나면 진행 중입니다.</p>'
+        : '<h2>오늘 키워드가 아직 없습니다</h2><p>지금 뽑고 있지도 않습니다. <button id="make">지금 뽑기</button>' + older + '</p><p style="color:#667085">몇 분 걸리고, 다 되면 이 탭에 저절로 나옵니다.</p>')
+        + '<pre id="dailylog"></pre>';
+      const b = p.querySelector('#make');
+      if (b) b.onclick = make;
+      const pre = p.querySelector('#dailylog');
+      pre.textContent = n.log || '';
+      setTimeout(() => { pre.scrollTop = pre.scrollHeight; }, 50);  // after the pane is on the page: start at the newest line
+      return;
+    }
+    const pre = p.querySelector('#dailylog');
+    if (!pre || pre.textContent === (n.log || '')) return;
+    const atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 30;
+    pre.textContent = n.log || '';
+    if (atBottom) pre.scrollTop = pre.scrollHeight;
   };
   const make = async () => {
     await fetch('/api/make-today', { method: 'POST', headers: { 'X-Report-App': '1', 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});

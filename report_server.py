@@ -46,7 +46,7 @@ REPORT_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}\.(html|csv)$")
 CUSTOM_NAME = re.compile(r"^직접뽑기/\d{4}-\d{2}-\d{2}_\d{4}_[0-9A-Za-z가-힣]+\.(html|csv)$")  # daily_keywords.py --seeds
 BASE_URL = f"http://{HOST}:{PORT}"
 # 서버 코드를 바꾸면 올립니다. 예전 버전 서버가 떠 있으면 끄고 새로 켭니다.
-SERVER_VERSION = 37
+SERVER_VERSION = 38
 LOG_PATH = dk.BASE_DIR / "logs" / "report_server.log"
 
 
@@ -304,7 +304,7 @@ class Handler(BaseHTTPRequestHandler):
             except OSError:
                 pass
             try:
-                log = "\n".join((dk.BASE_DIR / "logs" / "daily.log").read_text(encoding="utf-8", errors="replace").splitlines()[-12:])
+                log = "\n".join((dk.BASE_DIR / "logs" / "daily.log").read_text(encoding="utf-8", errors="replace").splitlines()[-300:])
             except OSError:
                 pass
         return {"report": report, "running": running, "latest": latest_report(), "sent_today": sent_today, "log": log}
