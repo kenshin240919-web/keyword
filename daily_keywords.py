@@ -348,8 +348,16 @@ def estimate_season(now_volumes, keys, today, start, end, per_month=False):
         try:
             series = with_retry(naver_api.datalab_daily, group, start.isoformat(), yesterday.isoformat(), keys)
         except ApiError as e:
-            log(f"  [건너뜀] 추이 {', '.join(group)}: {e}")
-            continue
+            # The whole group failed even after retries: ask one keyword at a time, so one keyword the API cannot
+            # take does not drop the other four (each ratio compares a keyword only with itself, so this is the same).
+            log(f"  추이 묶음 실패 → 하나씩 다시: {', '.join(group)} ({e})")
+            series = {}
+            for kw in group:
+                try:
+                    series.update(with_retry(naver_api.datalab_daily, [kw], start.isoformat(), yesterday.isoformat(), keys))
+                except ApiError as e2:
+                    log(f"  [건너뜀] 추이 {kw}: {e2}")
+                time.sleep(1.0)
         for kw in group:
             daily = series.get(kw, {})
             now_sum = sum(v for d, v in daily.items() if d in recent)
@@ -357,7 +365,8 @@ def estimate_season(now_volumes, keys, today, start, end, per_month=False):
             if now_sum > 0:
                 ratio = (past_sum / len(season)) / (now_sum / len(recent)) if per_month else past_sum / now_sum
                 result[kw] = (round(now_volumes[kw] * ratio), ratio)
-        time.sleep(0.3)
+        # One request a second: at about three a second the trend API often answered 500 (2026-11-16).
+        time.sleep(1.0)
     return result
 
 
