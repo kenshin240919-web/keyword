@@ -23,6 +23,7 @@ import html
 import json
 import os
 import re
+import socket
 import sqlite3
 import sys
 import time
@@ -230,14 +231,38 @@ def excluded_keywords(db, today, recent_days):
 
 # ---------- 수집 ----------
 
+def wait_for_internet(minutes=10):
+    """At logon or right after sleep the PC can start this before its internet is up: every request then failed
+    with 'getaddrinfo failed' and the day's report was made from nothing (2026-11-17, 05:28). Wait for it first."""
+    host = urllib.parse.urlsplit(keywordstool.BASE_URL).hostname
+    for i in range(minutes * 4):
+        try:
+            socket.getaddrinfo(host, 443)
+            if i:
+                log("  인터넷이 연결되어 시작합니다.")
+            return True
+        except OSError:
+            if i == 0:
+                log(f"  인터넷 연결을 기다리는 중 (최대 {minutes}분)…")
+            time.sleep(15)
+    return False
+
+
 def collect_candidates(seeds, keys):
-    """씨앗 5개씩 keywordstool에 넣어 {키워드: (월간 검색수, 광고 경쟁도)}를 모읍니다."""
+    """씨앗 5개씩 keywordstool에 넣어 {키워드: (월간 검색수, 광고 경쟁도)}를 모읍니다.
+    씨앗 묶음의 절반 넘게 실패하면 (인터넷 끊김 등) 반쪽 결과로 리포트를 만들지 않도록 중단합니다."""
     found = {}
-    for group in chunks(seeds, keywordstool.MAX_HINTS):
+    groups = chunks(seeds, keywordstool.MAX_HINTS)
+    failed = 0
+    for group in groups:
         try:
             data = with_retry(keywordstool.fetch_keywords, group, keys)
         except ApiError as e:
             log(f"  [건너뜀] 씨앗 {', '.join(group)}: {e}")
+            failed += 1
+            if failed * 2 > len(groups):
+                sys.exit(f"[오류] 씨앗 묶음 {len(groups)}개 중 {failed}개가 실패해 오늘 키워드를 만들지 않았습니다 "
+                         f"(마지막 오류: {e}). 인터넷 연결을 확인한 뒤 홈의 [지금 뽑기]를 눌러 주세요.")
             continue
         for item in data.get("keywordList", []):
             kw = "".join(str(item.get("relKeyword", "")).split())
@@ -825,6 +850,8 @@ def run(today=None, refresh=False, seeds=None, period=None, open_browser=True):
     start, end = period if custom and period else season_window(today, config["season_months_ahead"])
     period = [start.isoformat(), end.isoformat()]
 
+    if not wait_for_internet():
+        sys.exit("[오류] 10분 동안 인터넷에 연결되지 않아 오늘 키워드를 뽑지 못했습니다. 연결된 뒤 홈의 [지금 뽑기]를 눌러 주세요.")
     log(f"1/5 연관 키워드 수집 (씨앗 {len(seeds)}개)")
     found = collect_candidates(seeds, keys)
     banned = [b for b in config["banned_words"] if b]
