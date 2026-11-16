@@ -62,6 +62,63 @@ def _deployed(url, log):
     return any(pattern.search(line) for line in log or [])
 
 
+def _today(iso):
+    """Whether a job's createdAt (ISO, UTC) is today on this PC."""
+    try:
+        return datetime.fromisoformat(str(iso).replace("Z", "+00:00")).astimezone().date() == datetime.now().date()
+    except ValueError:
+        return False
+
+
+def _keyword_block(keyword, all_jobs, blog, flow, shot_latest, plans, auto):
+    """One keyword's four blog rows and its site (autopost) run."""
+    jobs = [j for j in all_jobs if j.get("ctaKeyword") == keyword]
+    flows = {r.get("slot"): r for r in (flow or []) if r.get("keyword") == keyword}
+    done = {r.get("slot"): r for r in (shot_latest or []) if r.get("keyword") == keyword}
+    rows = []
+    for n in range(1, 5):
+        job = next((j for j in jobs if j.get("style") == n), None)
+        st = (job or {}).get("styles", {}).get(str(n)) or {}
+        plan = plans.get((job or {}).get("id"), {})
+        # shot's "latest" list covers the newest keyword only; for older ones its per-post record says done.
+        f, d = flows.get(n) or {}, done.get(n) or ({"done": True} if plan.get("done") else {})
+        rows.append({
+            "blog": n, "job": (job or {}).get("id", ""), "keyword": (job or {}).get("keyword", ""),
+            "actions": _actions(job, st, f, plan),
+            "write": _write_state(job),
+            "video": _video_state(f, d, job, plan),
+            "link": _link_state(job, (blog or {}).get("qrTasks") or [], (blog or {}).get("config", {}).get("qrBlog") or 1,
+                                (blog or {}).get("qrCheck")),
+            "naver": _naver_state(st, job),
+        })
+    site = None
+    # Which WordPress site each post went to: match its address to autopost's site list {name: public url}.
+    publics = sorted(((name, str(url).rstrip("/")) for name, url in ((auto or {}).get("sites") or {}).items() if url),
+                     key=lambda x: -len(x[1]))  # gov.guidejung.com before guidejung.com
+    def site_name(url):
+        host = str(url).split("//")[-1]
+        return next((name for name, pub in publics if host.startswith(pub.split("//")[-1])), "")
+    for j in (auto or {}).get("jobs", []):
+        if keyword and j.get("keyword") == keyword:
+            result = j.get("result") or {}
+            links_live = [_deployed(v.get("public"), j.get("log")) for v in result.values() if isinstance(v, dict) and v.get("public")]
+            errors = [line for line in j.get("log") or [] if "오류:" in line]
+            site = {"state": j.get("state"), "job": j.get("id"),
+                    # why it failed, in words: the run's error line without the time
+                    "error": _explain(errors[-1].split("오류:", 1)[1].strip()[:300]) if errors and j.get("state") == "실패" else "",
+                    # 배포 다시: the run ended but a written post is not live (failed or stopped deploy)
+                    "redeploy": j.get("state") in ("실패", "중단", "완료") and bool(links_live) and not all(links_live),
+                    # A post's address exists as soon as it is written, but opens only after its site's deploy.
+                    "links": [{"site": site_name(v.get("public")), "title": v.get("title", k), "url": v.get("public"),
+                               "live": _deployed(v.get("public"), j.get("log"))}
+                              for k, v in sorted(result.items()) if isinstance(v, dict) and v.get("public")],
+                    "last": (j.get("log") or [""])[-1] if j.get("log") else ""}
+    qr = next((j["link"] for j in jobs if "site.naver.com" in str(j.get("link") or "")), "")
+    if site is not None and qr:
+        site["qr"] = qr
+    return {"keyword": keyword, "rows": rows, "site": site}
+
+
 def overview():
     blog = _get(f"{BLOGAUTO}/api/status", {"X-Blogauto": "1"})
     flow = _get(f"{SHOT}/api/flow/status", {"X-Shot-Flow": "1"})
@@ -92,52 +149,16 @@ def overview():
         programs.append({"name": "Flow 크롬", "ok": bool(last_flow) and now - last_flow < ALIVE_SECONDS,
                          "fix": "D:\\guidejung\\바로가기 폴더의 'Flow 영상 크롬' (Shot Flow 확장 · 자동 생성 켜기)"})
 
-    # Latest keyword sent from the report: the newest Blog Automator jobs that carry ctaKeyword.
-    jobs = [j for j in (blog or {}).get("jobs", []) if j.get("ctaKeyword")]
-    keyword = jobs[0]["ctaKeyword"] if jobs else ""
-    jobs = [j for j in jobs if j.get("ctaKeyword") == keyword]
-    flows = {r.get("slot"): r for r in (flow or []) if r.get("keyword") == keyword}
-    done = {r.get("slot"): r for r in (shot_latest or []) if r.get("keyword") == keyword}
-    rows = []
-    for n in range(1, 5):
-        job = next((j for j in jobs if j.get("style") == n), None)
-        st = (job or {}).get("styles", {}).get(str(n)) or {}
-        f, d = flows.get(n) or {}, done.get(n) or {}
-        rows.append({
-            "blog": n, "job": (job or {}).get("id", ""), "keyword": (job or {}).get("keyword", ""),
-            "actions": _actions(job, st, f, plans.get((job or {}).get("id"), {})),
-            "write": _write_state(job),
-            "video": _video_state(f, d, job, plans.get((job or {}).get("id"), {})),
-            "link": _link_state(job, (blog or {}).get("qrTasks") or [], (blog or {}).get("config", {}).get("qrBlog") or 1,
-                                (blog or {}).get("qrCheck")),
-            "naver": _naver_state(st, job),
-        })
-    site = None
-    # Which WordPress site each post went to: match its address to autopost's site list {name: public url}.
-    publics = sorted(((name, str(url).rstrip("/")) for name, url in ((auto or {}).get("sites") or {}).items() if url),
-                     key=lambda x: -len(x[1]))  # gov.guidejung.com before guidejung.com
-    def site_name(url):
-        host = str(url).split("//")[-1]
-        return next((name for name, pub in publics if host.startswith(pub.split("//")[-1])), "")
-    for j in (auto or {}).get("jobs", []):
-        if keyword and j.get("keyword") == keyword:
-            result = j.get("result") or {}
-            links_live = [_deployed(v.get("public"), j.get("log")) for v in result.values() if isinstance(v, dict) and v.get("public")]
-            errors = [line for line in j.get("log") or [] if "오류:" in line]
-            site = {"state": j.get("state"), "job": j.get("id"),
-                    # why it failed, in words: the run's error line without the time
-                    "error": _explain(errors[-1].split("오류:", 1)[1].strip()[:300]) if errors and j.get("state") == "실패" else "",
-                    # 배포 다시: the run ended but a written post is not live (failed or stopped deploy)
-                    "redeploy": j.get("state") in ("실패", "중단", "완료") and bool(links_live) and not all(links_live),
-                    # A post's address exists as soon as it is written, but opens only after its site's deploy.
-                    "links": [{"site": site_name(v.get("public")), "title": v.get("title", k), "url": v.get("public"),
-                               "live": _deployed(v.get("public"), j.get("log"))}
-                              for k, v in sorted(result.items()) if isinstance(v, dict) and v.get("public")],
-                    "last": (j.get("log") or [""])[-1] if j.get("log") else ""}
-    qr = next((j["link"] for j in jobs if "site.naver.com" in str(j.get("link") or "")), "")
-    if site is not None and qr:
-        site["qr"] = qr
-    return {"programs": programs, "keyword": keyword, "rows": rows, "site": site,
+    # Every keyword sent today (newest first; at least the newest one), each with its four blogs and its site run.
+    # Before, only the newest showed: a second keyword sent hid the first one and its buttons (2026-11-16).
+    all_jobs = [j for j in (blog or {}).get("jobs", []) if j.get("ctaKeyword")]
+    order = []
+    for j in all_jobs:
+        if j["ctaKeyword"] not in order and (not order or _today(j.get("createdAt"))):
+            order.append(j["ctaKeyword"])
+    keywords = [_keyword_block(k, all_jobs, blog, flow, shot_latest, plans, auto) for k in order[:6]]
+    first = keywords[0] if keywords else {"keyword": "", "rows": [], "site": None}
+    return {"programs": programs, "keyword": first["keyword"], "rows": first["rows"], "site": first["site"], "keywords": keywords,
             "qr_alerts": _qr_alerts((blog or {}).get("jobs", [])), "at": time.strftime("%H:%M:%S")}
 
 
@@ -422,9 +443,7 @@ STATUS_HTML = """<!doctype html>
     <p class="note">[QR 만들고 다시 시작]을 누르면 QR 주소를 새로 만들어 그 글을 다시 임시저장합니다 (예전 임시저장 글은 네이버에서 지워 주세요). gov 주소 그대로 둘 글은 [확인함]을 누르면 이 칸에서 사라집니다.</p></section>
   <section><h2>프로그램</h2><div class="chips" id="programs"></div>
     <p class="note">빨간 항목은 꺼져 있거나 연결되지 않은 것입니다. 이름 옆 안내대로 켜 주세요.</p></section>
-  <section><h2 id="title">진행 중인 키워드 없음</h2>
-    <table><thead><tr><th>블로그</th><th>키워드</th><th>① 글 작성</th><th>② 숏폼 영상</th><th>③ QR 링크</th><th>④ 네이버 임시저장</th></tr></thead><tbody id="rows"></tbody></table></section>
-  <section><h2>사이트 발행 (guidejung · gov) · 네이버 QR</h2><div id="site" class="note">-</div></section>
+  <div id="keywords"><section><h2>진행 중인 키워드 없음</h2></section></div>
   <p class="note">3초마다 자동으로 새로 고칩니다. 리포트: <a href="/home#report" target="_top">오늘 키워드 보기</a></p>
 </main>
 <script>
@@ -438,30 +457,34 @@ async function refresh() {
     document.getElementById('at').textContent = `${d.at} 기준 · 프로그램 v${d.version || '?'}`;
     document.getElementById('programs').innerHTML = d.programs.map(p =>
       `<span class="chip ${p.ok ? '' : 'off'}">${p.ok ? '●' : '○'} ${esc(p.name)}${p.ok || !p.fix ? '' : `<small>→ ${esc(p.fix)}</small>`}</span>`).join('');
-    document.getElementById('title').textContent = d.keyword ? `키워드: ${d.keyword}` : '진행 중인 키워드 없음 (리포트에서 블로그 4곳에 보내기)';
-    const rowsHtml = d.rows.map(r =>
-      `<tr><td><b>${r.blog}번</b></td><td>${esc(r.keyword)}</td>${cell(r.write, r.actions.write)}${cell(r.video, r.actions.video)}${cell(r.link)}${cell(r.naver, r.actions.naver)}</tr>`).join('');
-    if (rowsHtml !== lastRows) { document.getElementById('rows').innerHTML = rowsHtml; lastRows = rowsHtml; }
-    const s = d.site;
-    const html = !s ? '이 키워드의 사이트 작업 없음' :
-      `<div class="${s.state === '완료' ? 'ok' : s.state === '실패' ? 'err' : 'run'}">${esc(s.state)}</div>
-       ${s.links.map(l => `<div class="post"><span class="tag">${esc(l.site || '사이트')}</span>
-         <a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.title)}</a>${l.live ? '' : ' <span class="tag" style="background:#fff4e5;color:#b54708">배포 전 · 아직 안 열림</span>'}
-         <span class="url">${esc(l.url)}</span><button data-copy="${esc(l.url)}">주소 복사</button></div>`).join('')}
-       ${s.qr ? `<div class="post"><span class="tag">네이버 QR</span><span>노란 표·썸네일 링크</span>
-         <span class="url">${esc(s.qr)}</span><button data-copy="${esc(s.qr)}">주소 복사</button></div>` : ''}
-       ${s.last ? `<div class="note">${s.state === '완료' ? '마지막 기록' : '지금'}: ${esc(s.last)}</div>` : ''}
-       ${s.error ? `<div class="err">실패 이유: ${esc(s.error)}</div>` : ''}
-       ${s.state === '실패' && !s.links.length ? `<div class="acts">${btns([{ label: '사이트 글 다시 쓰기', act: 'rerun', id: s.job }])} <span class="note">같은 키워드·설정으로 gov·guidejung 글을 처음부터 다시 쓰고 발행합니다. 네이버 글 4편은 그 주소를 기다렸다가 이어서 진행합니다.</span></div>` : ''}
-       ${s.redeploy ? `<div class="acts">${btns([{ label: '배포 다시', act: 'redeploy', id: s.job }])} <span class="note">글은 써졌는데 사이트에 아직 안 올라갔습니다. 다시 쓰지 않고 배포만 다시 합니다.</span></div>` : ''}`;
+    // One block per keyword sent today, newest first: its four blogs, then its site run.
+    const blocks = (d.keywords || []).map((k, i) => {
+      const rowsHtml = k.rows.map(r =>
+        `<tr><td><b>${r.blog}번</b></td><td>${esc(r.keyword)}</td>${cell(r.write, r.actions.write)}${cell(r.video, r.actions.video)}${cell(r.link)}${cell(r.naver, r.actions.naver)}</tr>`).join('');
+      const s = k.site;
+      const site = !s ? '이 키워드의 사이트 작업 없음' :
+        `<div class="${s.state === '완료' ? 'ok' : s.state === '실패' ? 'err' : 'run'}">${esc(s.state)}</div>
+         ${s.links.map(l => `<div class="post"><span class="tag">${esc(l.site || '사이트')}</span>
+           <a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.title)}</a>${l.live ? '' : ' <span class="tag" style="background:#fff4e5;color:#b54708">배포 전 · 아직 안 열림</span>'}
+           <span class="url">${esc(l.url)}</span><button data-copy="${esc(l.url)}">주소 복사</button></div>`).join('')}
+         ${s.qr ? `<div class="post"><span class="tag">네이버 QR</span><span>노란 표·썸네일 링크</span>
+           <span class="url">${esc(s.qr)}</span><button data-copy="${esc(s.qr)}">주소 복사</button></div>` : ''}
+         ${s.last ? `<div class="note">${s.state === '완료' ? '마지막 기록' : '지금'}: ${esc(s.last)}</div>` : ''}
+         ${s.error ? `<div class="err">실패 이유: ${esc(s.error)}</div>` : ''}
+         ${s.state === '실패' && !s.links.length ? `<div class="acts">${btns([{ label: '사이트 글 다시 쓰기', act: 'rerun', id: s.job }])} <span class="note">같은 키워드·설정으로 gov·guidejung 글을 처음부터 다시 쓰고 발행합니다. 네이버 글 4편은 그 주소를 기다렸다가 이어서 진행합니다.</span></div>` : ''}
+         ${s.redeploy ? `<div class="acts">${btns([{ label: '배포 다시', act: 'redeploy', id: s.job }])} <span class="note">글은 써졌는데 사이트에 아직 안 올라갔습니다. 다시 쓰지 않고 배포만 다시 합니다.</span></div>` : ''}`;
+      return `<section><h2>키워드: ${esc(k.keyword)}${i === 0 && d.keywords.length > 1 ? ' <span class="note">(가장 최근)</span>' : ''}</h2>
+        <table><thead><tr><th>블로그</th><th>키워드</th><th>① 글 작성</th><th>② 숏폼 영상</th><th>③ QR 링크</th><th>④ 네이버 임시저장</th></tr></thead><tbody>${rowsHtml}</tbody></table>
+        <h2 style="margin-top:14px">사이트 발행 (guidejung · gov) · 네이버 QR</h2><div class="note">${site}</div></section>`;
+    }).join('') || '<section><h2>진행 중인 키워드 없음 (리포트에서 블로그 4곳에 보내기)</h2></section>';
     // Redraw only when it changed, so a "복사됨" label is not wiped by the 3-second refresh.
-    if (html !== lastSite) { document.getElementById('site').innerHTML = html; lastSite = html; }
+    if (blocks !== lastBlocks) { document.getElementById('keywords').innerHTML = blocks; lastBlocks = blocks; }
     showQrAlerts(d.qr_alerts || []);
   } catch (e) {
     document.getElementById('at').textContent = '상태를 읽지 못했습니다';
   }
 }
-let lastSite = '', lastRows = '', lastAlerts = null;
+let lastBlocks = '', lastAlerts = null;
 // Dismissed alerts are remembered in this browser (key: job id + its link, so a new gov link alerts again).
 const seenKey = 'qrAlertsSeen';
 const seen = () => { try { return JSON.parse(localStorage.getItem(seenKey) || '[]'); } catch { return []; } };
@@ -507,12 +530,11 @@ async function runAct(e) {
     alert('하지 못했습니다: ' + err.message + (/gov 글 주소가 없습니다|not found|404/.test(err.message)
       ? '\\n\\nBlog Automator가 예전 버전으로 켜져 있을 수 있습니다. Blog Automator 창을 닫고 실행.bat으로 다시 켠 뒤 눌러 주세요.' : ''));
   }
-  lastRows = ''; lastAlerts = null; setTimeout(refresh, 1500);
+  lastBlocks = ''; lastAlerts = null; setTimeout(refresh, 1500);
 }
-document.getElementById('rows').addEventListener('click', runAct);
+document.getElementById('keywords').addEventListener('click', runAct);
 document.getElementById('qrList').addEventListener('click', runAct);
-document.getElementById('site').addEventListener('click', runAct);
-document.getElementById('site').addEventListener('click', async e => {
+document.getElementById('keywords').addEventListener('click', async e => {
   const url = e.target.dataset.copy;
   if (!url) return;
   try { await navigator.clipboard.writeText(url); }
