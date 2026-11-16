@@ -113,13 +113,17 @@ def fetch_keywords(hints, keys):
     query = urllib.parse.urlencode({"hintKeywords": ",".join(hints), "showDetail": "1"})
     req = urllib.request.Request(f"{BASE_URL}{URI}?{query}", headers=headers, method="GET")
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=60) as resp:  # big answers for 5 hints can take a while
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")
         raise ApiError(f"API 요청 실패 (HTTP {e.code}): {body}") from None
     except urllib.error.URLError as e:
         raise ApiError(f"네트워크 오류: {e.reason}") from None
+    except (TimeoutError, OSError) as e:
+        # A reply that stops halfway (read timeout, connection reset) is not a URLError: it ended the whole run with
+        # a TimeoutError instead of being tried again and skipped like the other API errors (2026-11-16).
+        raise ApiError(f"네트워크 오류 (응답이 끊기거나 늦음): {e}") from None
 
 
 def to_count(value):

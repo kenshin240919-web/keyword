@@ -30,6 +30,10 @@ def _request(req):
         raise ApiError(f"API 요청 실패 (HTTP {e.code}): {body}") from None
     except urllib.error.URLError as e:
         raise ApiError(f"네트워크 오류: {e.reason}") from None
+    except (TimeoutError, OSError) as e:
+        # A reply that stops halfway (read timeout, connection reset) is not a URLError: it ended the whole run with
+        # a TimeoutError instead of being tried again and skipped like the other API errors (2026-11-16).
+        raise ApiError(f"네트워크 오류 (응답이 끊기거나 늦음): {e}") from None
 
 
 def _headers(keys):
