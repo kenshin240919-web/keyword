@@ -418,17 +418,19 @@ STATUS_HTML = """<!doctype html>
 <style>
   :root { --ink:#1f2a37; --muted:#667085; --line:#e4e7ec; --ok:#12805c; --run:#1a73e8; --err:#c0392b; --warn:#b54708; --bg:#f6f7f9; }
   * { box-sizing:border-box; }
-  body { margin:0; font:15px/1.5 'Malgun Gothic', sans-serif; color:var(--ink); background:var(--bg); }
+  body { margin:0; font:16px/1.55 'Malgun Gothic', sans-serif; color:var(--ink); background:var(--bg); }
   header { background:var(--ink); color:#fff; padding:14px 20px; display:flex; justify-content:space-between; align-items:center; }
-  main { max-width:1100px; margin:0 auto; padding:16px; }
+  main { max-width:1600px; margin:0 auto; padding:16px 24px; }
+  /* Wide screens: programs on the left, keywords on the right (it was a narrow column in a wide page, 2026-11-19). */
+  @media (min-width: 1400px) { main { display:grid; grid-template-columns:340px 1fr; gap:16px; align-items:start; } main > .side { position:sticky; top:12px; } main > .note { grid-column:2; } }
   section { background:#fff; border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin-bottom:14px; }
-  h2 { font-size:16px; margin:0 0 10px; }
+  h2 { font-size:18px; margin:0 0 10px; }
   .chips { display:flex; flex-wrap:wrap; gap:8px; }
-  .chip { padding:5px 10px; border-radius:16px; font-size:13px; background:#e9f6f0; color:var(--ok); }
+  .chip { padding:6px 12px; border-radius:16px; font-size:14px; background:#e9f6f0; color:var(--ok); }
   .chip.off { background:#fdecea; color:var(--err); }
   .chip small { color:var(--muted); margin-left:4px; }
   table { width:100%; border-collapse:collapse; }
-  th, td { text-align:left; padding:10px 8px; border-top:1px solid var(--line); vertical-align:top; font-size:14px; }
+  th, td { text-align:left; padding:10px 10px; border-top:1px solid var(--line); vertical-align:top; font-size:15px; }
   th { color:var(--muted); font-weight:normal; border-top:0; }
   .ok { color:var(--ok); } .run { color:var(--run); } .err { color:var(--err); } .warn { color:var(--warn); } .wait { color:var(--muted); }
   .note { color:var(--muted); font-size:13px; }
@@ -450,11 +452,13 @@ STATUS_HTML = """<!doctype html>
 <body>
 <header><b>전체 진행 상황</b><span id="at" class="note" style="color:#cbd5e1"></span></header>
 <main>
+  <div class="side">
   <section id="qrAlerts" class="alert" hidden><h2>⚠️ QR 대신 gov 주소로 들어간 글 <span id="qrCount"></span></h2>
     <div id="qrList"></div>
     <p class="note">[QR 만들고 다시 시작]을 누르면 QR 주소를 새로 만들어 그 글을 다시 임시저장합니다 (예전 임시저장 글은 네이버에서 지워 주세요). gov 주소 그대로 둘 글은 [확인함]을 누르면 이 칸에서 사라집니다.</p></section>
   <section><h2>프로그램</h2><div class="chips" id="programs"></div>
     <p class="note">빨간 항목은 꺼져 있거나 연결되지 않은 것입니다. 이름 옆 안내대로 켜 주세요.</p></section>
+  </div>
   <div id="keywords"><section><h2>진행 중인 키워드 없음</h2></section></div>
   <p class="note">3초마다 자동으로 새로 고칩니다. 리포트: <a href="/home#report" target="_top">오늘 키워드 보기</a></p>
 </main>
