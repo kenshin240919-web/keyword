@@ -70,6 +70,17 @@ def _today(iso):
         return False
 
 
+def _quiet_minutes(run):
+    """Minutes since the site run's last log line ("HH:MM:SS ..."), so a stuck deploy is visible (2026-11-19)."""
+    try:
+        hms = datetime.strptime((run.get("log") or [""])[-1][:8], "%H:%M:%S").time()
+    except ValueError:
+        return 0
+    last = datetime.combine(datetime.now().date(), hms)
+    minutes = (datetime.now() - last).total_seconds() / 60
+    return int(minutes if minutes >= 0 else minutes + 24 * 60)
+
+
 def _keyword_block(keyword, all_jobs, blog, flow, shot_latest, plans, auto):
     """One keyword's four blog rows and its site (autopost) run."""
     jobs = [j for j in all_jobs if j.get("ctaKeyword") == keyword]
@@ -112,7 +123,8 @@ def _keyword_block(keyword, all_jobs, blog, flow, shot_latest, plans, auto):
                     "links": [{"site": site_name(v.get("public")), "title": v.get("title", k), "url": v.get("public"),
                                "live": _deployed(v.get("public"), j.get("log"))}
                               for k, v in sorted(result.items()) if isinstance(v, dict) and v.get("public")],
-                    "last": (j.get("log") or [""])[-1] if j.get("log") else ""}
+                    "last": (j.get("log") or [""])[-1] if j.get("log") else "",
+                    "quiet": _quiet_minutes(j) if j.get("state") == "진행 중" else 0}
     qr = next((j["link"] for j in jobs if "site.naver.com" in str(j.get("link") or "")), "")
     if site is not None and qr:
         site["qr"] = qr
@@ -470,6 +482,7 @@ async function refresh() {
          ${s.qr ? `<div class="post"><span class="tag">네이버 QR</span><span>노란 표·썸네일 링크</span>
            <span class="url">${esc(s.qr)}</span><button data-copy="${esc(s.qr)}">주소 복사</button></div>` : ''}
          ${s.last ? `<div class="note">${s.state === '완료' ? '마지막 기록' : '지금'}: ${esc(s.last)}</div>` : ''}
+         ${s.quiet >= 10 ? `<div class="warn">⚠️ ${s.quiet}분째 새 기록이 없습니다. 멈췄을 수 있습니다 → guidejung 끄기 → 시작 후 [배포 다시]</div>` : s.state === '진행 중' && s.last ? `<div class="note">(마지막 기록 ${s.quiet}분 전 · 10분 넘게 새 기록이 없으면 여기에 경고가 뜹니다)</div>` : ''}
          ${s.error ? `<div class="err">실패 이유: ${esc(s.error)}</div>` : ''}
          ${s.state === '실패' && !s.links.length ? `<div class="acts">${btns([{ label: '사이트 글 다시 쓰기', act: 'rerun', id: s.job }])} <span class="note">같은 키워드·설정으로 gov·guidejung 글을 처음부터 다시 쓰고 발행합니다. 네이버 글 4편은 그 주소를 기다렸다가 이어서 진행합니다.</span></div>` : ''}
          ${s.redeploy ? `<div class="acts">${btns([{ label: '배포 다시', act: 'redeploy', id: s.job }])} <span class="note">글은 써졌는데 사이트에 아직 안 올라갔습니다. 다시 쓰지 않고 배포만 다시 합니다.</span></div>` : ''}`;
