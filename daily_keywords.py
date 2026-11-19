@@ -627,7 +627,7 @@ document.addEventListener('click', async e => {
     + (site.thumb_note ? '\\n\\n(썸네일은 만들지 않습니다: ' + site.thumb_note + ')' : '');
   const again = b.classList.contains('sent') ? '이미 보낸 키워드입니다. 다시 보낼까요?\\n\\n' : '';
   if (!confirm(again + plan)) return;
-  b.disabled = true;
+  b.disabled = true; b.textContent = '보내는 중\u2026 (썸네일 만들고 작업 등록, 1분 안쪽)';
   try {
     const d = await call('/api/post');
     renderSent(d.sent);
@@ -644,7 +644,7 @@ document.addEventListener('click', async e => {
       ? '리포트 서버와 연결이 끊겼습니다. open_report.bat으로 리포트를 다시 연 뒤 눌러 주세요. 계속되면 logs 폴더의 report_server.log를 보여 주세요.'
       : err.message));
   }
-  finally { b.disabled = false; }
+  finally { b.disabled = false; b.textContent = label; }
 });
 if (live) {
   fetch('/api/sent').then(r => r.json()).then(d => renderSent(d.keywords)).catch(() => {});
