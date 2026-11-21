@@ -146,9 +146,11 @@ foreach ($app in $apps) {
     $cur = (git -C $dir branch --show-current) 2>$null
     if ($cur -and $cur -ne $app.Branch) {
         $out = (cmd /c "git -C `"$dir`" fetch origin +refs/heads/$($app.Branch):$ref 2>&1" | Out-String).Trim()
-        $dirty = (git -C $dir status --porcelain --untracked-files=no) 2>$null
+        # npm install rewrites package-lock.json on its own; that change is not the user's work (2026-11-21).
+        $dirty = @((git -C $dir status --porcelain --untracked-files=no) 2>$null | Where-Object { $_ -notmatch 'package-lock\.json$' })
+        if (-not $dirty.Count) { cmd /c "git -C `"$dir`" checkout -q -- package-lock.json 2>&1" | Out-Null }
         cmd /c "git -C `"$dir`" merge-base --is-ancestor HEAD $ref" | Out-Null
-        if ($LASTEXITCODE -eq 0 -and -not $dirty) {
+        if ($LASTEXITCODE -eq 0 -and -not $dirty.Count) {
             cmd /c "git -C `"$dir`" checkout -q -B $($app.Branch) $ref 2>&1" | Out-Null
             Say "  '$cur' 가지에 있어서 작업 가지($($app.Branch))로 옮겼습니다." Cyan
         } else {
