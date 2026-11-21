@@ -21,7 +21,7 @@ TELEGRAM_CHAT_ID=...
 | `python daily_keywords.py` | 작년 시즌(1년 전 기준 한 달 뒤 한 달) 검색수로 추천 10개 + 꼭 쓸 3개(★) → `reports\날짜.html`, `.csv` |
 | 리포트의 **블로그 4곳에 보내기** | 메인 키워드 → 1번 블로그, 세부 키워드 3개 → 2~4번 블로그로 Blog Automator에 글 작성·임시저장 요청. 동시에 자동 포스팅 프로그램(8777)에 메인 키워드 + 이미지로 guidejung·gov 발행 요청. 두 프로그램이 모두 켜져 있어야 함 |
 | `open_report.bat` 더블클릭 | 오늘 리포트 열기 (없으면 먼저 만듦) — **'오늘 썼어요' 버튼으로 작성 기록** |
-| `google_trends.bat` 더블클릭 (`python google_trends.py`) | 구글 트렌드 '지금 뜨는 검색어'만 따로 보기: 한국 최근 48시간, 글감 분야만 → `trends\날짜_시각_KR_48h.html`·`.csv` 저장 후 열기. `--hours 168`(7일)·`--active`(지금도 오르는 것만)·`--all`(모든 분야) |
+| `D:\guidejung\google_trends\구글트렌드.bat` 더블클릭 (`구글트렌드_7일.bat`) | 구글 트렌드 '지금 뜨는 검색어'만 따로 보기: 한국 최근 48시간(또는 7일), 글감 분야만 → 그 폴더의 `결과\날짜_시각_KR_48h.html`·`.csv` 저장 후 열기. 본체는 이 저장소의 `google_trends.py` (`--out 폴더`·`--hours 168`·`--active`·`--all`) |
 | `python daily_keywords.py --refresh` | 오늘 결과를 버리고 새로 뽑기 (같은 날 다시 실행하면 첫 결과 유지) |
 | (따로) 키워드 직접 뽑기 | 기존 흐름과 섞이지 않게 별도 폴더 `D:\guidejung\issue`의 독립 프로그램으로 옮김 (8766 포트, 업데이트.bat 대상 아님). 이 저장소의 `daily_keywords.py --seeds`/`run(seeds=, period=)`는 그 프로그램이 같은 계산을 쓰려고 남겨 둔 것 |
 | `python daily_keywords.py --written 궁합` | 이미 쓴 키워드로 기록 (이후 추천 제외) |

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """구글 트렌드 '지금 뜨는 검색어'(trends.google.com/trending)를 읽습니다.
 
-따로 쓰기 (google_trends.bat 더블클릭과 같음):
+따로 쓰기: D:\\guidejung\\google_trends\\구글트렌드.bat 더블클릭 (결과는 그 폴더의 결과\\)
     python google_trends.py                # 한국, 최근 48시간 → trends\\날짜_시각_KR_48h.html·.csv 저장 후 열기
+    python google_trends.py --out 폴더     # 결과를 그 폴더에 저장
     python google_trends.py --hours 168    # 최근 7일 (4, 24, 48, 168 가능)
     python google_trends.py --active       # 지금도 오르는 중인 것만
     python google_trends.py --all          # 글감 분야(GOOD_CATEGORIES) 말고 모든 분야
@@ -157,6 +158,7 @@ def main():
     p.add_argument("--all", action="store_true", help="모든 분야 (기본: 글감 분야만)")
     p.add_argument("--top", type=int, default=30, help="화면에 보여줄 개수")
     p.add_argument("--no-open", action="store_true", help="HTML을 브라우저로 열지 않음")
+    p.add_argument("--out", type=Path, default=OUT_DIR, help="결과 저장 폴더 (기본: key\\trends)")
     a = p.parse_args()
 
     rows, source = fetch_trends(a.geo, a.hours, a.hl)
@@ -166,8 +168,8 @@ def main():
     if a.active:
         rows = [r for r in rows if r["active"]]
 
-    OUT_DIR.mkdir(exist_ok=True)
-    stem = OUT_DIR / f"{datetime.now():%Y%m%d_%H%M}_{a.geo}_{a.hours}h"
+    a.out.mkdir(parents=True, exist_ok=True)
+    stem = a.out / f"{datetime.now():%Y%m%d_%H%M}_{a.geo}_{a.hours}h"
     with open(stem.with_suffix(".csv"), "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)
         w.writerow(["키워드", "구글 검색량", "상승률%", "진행중", "뜨기 시작", "분야", "연관 검색어"])
