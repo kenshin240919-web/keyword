@@ -10,7 +10,7 @@
     python daily_keywords.py --profile life  # life.guidejung.com용: seeds_life.txt + 경쟁 사이트 RSS 씨앗,
                                              # 기록 history_life.db, 결과 reports/life/날짜.json·.html (위 옵션 모두 함께 사용)
 
-흐름: seeds.txt → 연관 키워드(검색광고) → 작년 시즌 검색수 추정(데이터랩) → 1차 필터
+흐름: seeds.txt (+ 구글 트렌드 글감 분야, google_trends.py) → 연관 키워드(검색광고) → 작년 시즌 검색수 추정(데이터랩) → 1차 필터
       → 블로그 문서 수(검색 API) → 점수 → reports/날짜.html, .csv + history.db 기록
 
 작년 시즌: 오늘이 2026-10-20이면 2025-11-20 ~ 2025-12-20 (1년 전 기준 한 달 뒤 한 달).
@@ -33,6 +33,7 @@ import xml.etree.ElementTree as ET
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+import google_trends
 import keywordstool
 import naver_api
 from keywordstool import ApiError
@@ -64,6 +65,9 @@ DEFAULT_CONFIG = {
     "thumbnails_enabled": True,
     "thumbnail_dir": str(BASE_DIR / "thumbnail"),
     "thumbnail_out": str(BASE_DIR / "thumbnails"),
+    # 구글 트렌드 '지금 뜨는 검색어' (google_trends.py): 글감 분야 트렌드를 씨앗에 더하고(seed_limit개까지)
+    # 리포트에 '구글 트렌드 지금 뜨는 검색어' 칸(show개)을 붙입니다. categories가 비면 google_trends.GOOD_CATEGORIES.
+    "google_trends": {"enabled": True, "geo": "KR", "hours": 48, "seed_limit": 30, "show": 20, "categories": []},
 }
 TELEGRAM_KEYS = ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID")
 
@@ -115,8 +119,9 @@ def load_config():
     config = json.loads(json.dumps(DEFAULT_CONFIG))
     if CONFIG_PATH.exists():
         user = json.loads(CONFIG_PATH.read_text(encoding="utf-8-sig"))
-        config.update({k: v for k, v in user.items() if k != "weights"})
+        config.update({k: v for k, v in user.items() if k not in ("weights", "google_trends")})
         config["weights"].update(user.get("weights", {}))
+        config["google_trends"].update(user.get("google_trends", {}))
     else:
         user = {}
     if PROFILE in PROFILES:
@@ -163,6 +168,24 @@ def rss_seeds(urls):
     return seeds
 
 
+TRENDS = None  # 이번 실행에서 받은 글감 분야 구글 트렌드 (리포트 칸용). 안 받았거나 실패하면 None
+
+
+def google_trend_rows(config):
+    """글감 분야 구글 트렌드 (한 번만 받음). 꺼져 있거나 실패하면 빈 목록 — 고정 씨앗만으로 계속합니다."""
+    global TRENDS
+    gt = config["google_trends"]
+    if TRENDS is None and gt.get("enabled"):
+        try:
+            rows, source = google_trends.fetch_trends(gt.get("geo", "KR"), gt.get("hours", 48))
+            TRENDS = google_trends.good(rows, gt.get("categories"), config["banned_words"])
+            log(f"  구글 트렌드 {len(rows)}개 중 글감 분야 {len(TRENDS)}개 ({source})")
+        except Exception as e:  # network or page change
+            log(f"  [건너뜀] 구글 트렌드: {e}")
+            TRENDS = []
+    return TRENDS or []
+
+
 def load_seeds(today=None):
     if not SEEDS_PATH.exists():
         sys.exit(f"[오류] 씨앗 키워드 파일이 없습니다: {SEEDS_PATH}")
@@ -170,6 +193,13 @@ def load_seeds(today=None):
     if PROFILE in PROFILES:
         extra = [s for s in rss_seeds(PROFILES[PROFILE]["rss"]) if s not in seeds]
         log(f"  RSS 씨앗 {len(extra)}개 추가")
+        seeds += extra
+    config = load_config()
+    trend = google_trend_rows(config)
+    if trend:
+        extra = [s for s in google_trends.trend_seeds(trend, config["google_trends"].get("seed_limit", 30))
+                 if s not in seeds]
+        log(f"  구글 트렌드 씨앗 {len(extra)}개 추가")
         seeds += extra
     if not seeds:
         sys.exit(f"[오류] {SEEDS_PATH.name}에 씨앗 키워드를 한 줄에 하나씩 넣어 주세요.")
@@ -669,6 +699,15 @@ document.addEventListener('click', async e => {
 </script>"""
 
 
+def _trends_html(trends):
+    """'구글 트렌드 지금 뜨는 검색어' 칸. 점수 계산과 따로, 지금 뜨는 글감을 보여 주기만 합니다."""
+    if not trends:
+        return ""
+    return ("<h2 style='font-size:18px;margin-top:32px'>구글 트렌드 지금 뜨는 검색어 "
+            f"<span style='font-weight:400;color:#888;font-size:14px'>(글감 분야 {len(trends)}개 · ▲ 지금도 오르는 중 · "
+            "작년 시즌 점수와 별개로, 뜨는 동안 빨리 쓸 글감)</span></h2>\n" + google_trends.rows_html(trends))
+
+
 def write_html(rows, path, today, stats, buttons=True):
     """buttons=False (직접 뽑기): 블로그 4곳 보내기·오늘 썼어요 없이 '키워드 복사'만 — 다른 블로그용이라 매일 흐름과 섞지 않음."""
     acts = (lambda r: _post_button(r) + _write_button(r["keyword"])) if buttons else \
@@ -748,6 +787,7 @@ button.w:disabled {{ border-color: #bbb; color: #999; background: #f5f5f5; curso
 <table><tr><th>순위</th><th class="kw">키워드</th><th>작년 시즌<br>검색수(추정)</th><th>현재<br>월 검색수</th><th>블로그<br>문서 수</th><th>카페<br>글 수</th><th>기회 지수</th><th>시즌 변화</th><th>점수</th><th>광고 경쟁도</th><th class="why">추천 이유</th><th>블로그 검색</th><th>{'포스팅 · 작성 기록' if buttons else '복사'}</th></tr>
 {body}
 </table>
+{_trends_html(stats.get("trends"))}
 """ + ("""<div id="notice" class="notice" hidden>'오늘 썼어요'·'보내기' 버튼을 쓰려면 key 폴더의 <b>open_report.bat</b>을 더블클릭해 리포트를 여세요.</div>
 """ + REPORT_SCRIPT if buttons else COPY_SCRIPT) + "</body></html>\n", encoding="utf-8")
 
@@ -840,7 +880,7 @@ def run(today=None, refresh=False, seeds=None, period=None, open_browser=True):
             keys = keywordstool.load_keys(required=keywordstool.REQUIRED_KEYS)
             add_details(missing, {}, load_seeds(), keys)
             result_path.write_text(json.dumps(saved, ensure_ascii=False, indent=1), encoding="utf-8")
-        publish(saved["top"], today, saved["candidates"], config, saved.get("period"))
+        publish(saved["top"], today, saved["candidates"], config, saved.get("period"), saved.get("trends"))
         return
 
     seeds = seeds or load_seeds()
@@ -895,7 +935,8 @@ def run(today=None, refresh=False, seeds=None, period=None, open_browser=True):
     if custom:
         return publish_custom(top, today, len(rows), config, period, seeds, open_browser)
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
-    result_path.write_text(json.dumps({"top": top, "candidates": len(rows), "period": period},
+    trends = (TRENDS or [])[:config["google_trends"].get("show", 20)]
+    result_path.write_text(json.dumps({"top": top, "candidates": len(rows), "period": period, "trends": trends},
                                       ensure_ascii=False, indent=1),
                            encoding="utf-8")
     # 같은 날 --refresh 로 다시 뽑으면 그날 기록을 새 결과로 바꿉니다.
@@ -906,12 +947,12 @@ def run(today=None, refresh=False, seeds=None, period=None, open_browser=True):
     )
     db.commit()
 
-    publish(top, today, len(rows), config, period)
+    publish(top, today, len(rows), config, period, trends)
     if PROFILE == "blog" and all(keys.get(k) for k in TELEGRAM_KEYS):
         send_telegram(top, today.isoformat(), keys)
 
 
-def publish(top, today, candidates, config, period=None):
+def publish(top, today, candidates, config, period=None, trends=None):
     """꼭 쓸 키워드를 고르고, 리포트(HTML·CSV)를 쓰고 화면에 보여 준 뒤 브라우저로 엽니다.
 
     이미 블로그로 보냈거나 '오늘 썼어요'로 기록한 키워드는 꼭 쓸 키워드에서 빼고(전체 추천 목록에는 남김),
@@ -927,7 +968,7 @@ def publish(top, today, candidates, config, period=None):
     html_path = REPORT_DIR / f"{today.isoformat()}.html"
     csv_path = REPORT_DIR / f"{today.isoformat()}.csv"
     # life 리포트는 보기용: '블로그 4곳에 보내기'·'오늘 썼어요' 버튼 없음 (life 예약 작업이 .json을 읽고 --written으로 기록)
-    write_html(top, html_path, today.isoformat(), {"candidates": candidates, "period": period},
+    write_html(top, html_path, today.isoformat(), {"candidates": candidates, "period": period, "trends": trends},
                buttons=PROFILE == "blog")
     write_csv(top, csv_path)
 
