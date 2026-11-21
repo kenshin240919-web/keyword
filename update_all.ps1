@@ -141,6 +141,21 @@ foreach ($app in $apps) {
     # fails with "Cannot fast-forward to multiple branches" when the clone's fetch settings bring more.)
     # cmd merges git's stderr into plain text (PowerShell 5 would turn it into error records).
     $ref = "refs/remotes/origin/$($app.Branch)"
+    # The folder may sit on another branch (main, after another Claude session checked it out, 2026-11-21): when
+    # nothing there is uncommitted or missing from the working branch, it moves back to the working branch.
+    $cur = (git -C $dir branch --show-current) 2>$null
+    if ($cur -and $cur -ne $app.Branch) {
+        $out = (cmd /c "git -C `"$dir`" fetch origin +refs/heads/$($app.Branch):$ref 2>&1" | Out-String).Trim()
+        $dirty = (git -C $dir status --porcelain --untracked-files=no) 2>$null
+        cmd /c "git -C `"$dir`" merge-base --is-ancestor HEAD $ref" | Out-Null
+        if ($LASTEXITCODE -eq 0 -and -not $dirty) {
+            cmd /c "git -C `"$dir`" checkout -q -B $($app.Branch) $ref 2>&1" | Out-Null
+            Say "  '$cur' 가지에 있어서 작업 가지($($app.Branch))로 옮겼습니다." Cyan
+        } else {
+            Say "  '$cur' 가지에 GitHub 작업 가지에 없는 내용이 있어 그대로 두었습니다. 이 화면을 Claude에게 보여 주세요." Red
+            $problems++; continue
+        }
+    }
     $out = (cmd /c "git -C `"$dir`" fetch origin +refs/heads/$($app.Branch):$ref 2>&1 && git -C `"$dir`" merge --ff-only $ref 2>&1" | Out-String).Trim()
     if ($LASTEXITCODE -ne 0) {
         Say "  받기 실패: $out" Red
