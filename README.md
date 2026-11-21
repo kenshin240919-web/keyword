@@ -21,6 +21,7 @@ TELEGRAM_CHAT_ID=...
 | `python daily_keywords.py` | 작년 시즌(1년 전 기준 한 달 뒤 한 달) 검색수로 추천 10개 + 꼭 쓸 3개(★) → `reports\날짜.html`, `.csv` |
 | 리포트의 **블로그 4곳에 보내기** | 메인 키워드 → 1번 블로그, 세부 키워드 3개 → 2~4번 블로그로 Blog Automator에 글 작성·임시저장 요청. 동시에 자동 포스팅 프로그램(8777)에 메인 키워드 + 이미지로 guidejung·gov 발행 요청. 두 프로그램이 모두 켜져 있어야 함 |
 | `open_report.bat` 더블클릭 | 오늘 리포트 열기 (없으면 먼저 만듦) — **'오늘 썼어요' 버튼으로 작성 기록** |
+| `D:\guidejung\google_trends\구글트렌드.bat` 더블클릭 (`구글트렌드_7일.bat`) | 구글 트렌드 '지금 뜨는 검색어'만 따로 보기: 한국 최근 48시간(또는 7일), 글감 분야만 → 그 폴더의 `결과\날짜_시각_KR_48h.html`·`.csv` 저장 후 열기. 본체는 이 저장소의 `google_trends.py` (`--out 폴더`·`--hours 168`·`--active`·`--all`) |
 | `python daily_keywords.py --refresh` | 오늘 결과를 버리고 새로 뽑기 (같은 날 다시 실행하면 첫 결과 유지) |
 | (따로) 키워드 직접 뽑기 | 기존 흐름과 섞이지 않게 별도 폴더 `D:\guidejung\issue`의 독립 프로그램으로 옮김 (8766 포트, 업데이트.bat 대상 아님). 이 저장소의 `daily_keywords.py --seeds`/`run(seeds=, period=)`는 그 프로그램이 같은 계산을 쓰려고 남겨 둔 것 |
 | `python daily_keywords.py --written 궁합` | 이미 쓴 키워드로 기록 (이후 추천 제외) |
@@ -33,6 +34,7 @@ TELEGRAM_CHAT_ID=...
 | `D:\guidejung\업데이트.bat` 더블클릭 | key·BlogAutomator·autopost·shot을 GitHub 최신으로 받고, 새 코드를 받은 프로그램이 켜져 있으면 다시 켬 (`update_all.ps1`, 기록 `logs\update.log`). 처음 한 번은 `update_all.bat`으로 실행하면 `업데이트.bat`이 만들어짐 |
 
 - 씨앗 키워드: `seeds.txt` (한 줄에 하나)
+- 구글 트렌드: 매일 리포트가 글감 분야(쇼핑·건강·법·정부·직업·교육 등, 엔터·스포츠·정치 제외) 트렌드를 씨앗에 30개까지 더하고, 리포트 맨 아래에 **구글 트렌드 지금 뜨는 검색어** 칸(20개)을 붙입니다. 이 칸은 작년 시즌 점수와 별개로 '지금 빨리 쓸 글감'. 끄거나 바꾸려면 `config.json`의 `"google_trends": {"enabled": false}` (geo·hours·seed_limit·show·categories)
 - 다시 추천하지 않는 키워드: 최근 3일(`exclude_recent_days`) 추천한 것, **블로그로 보낸 것**, **작성 완료** 누른 것 (띄어쓰기·대소문자 무시). 그날 리포트는 아침 첫 결과를 유지하므로 바로 반영하려면 `python daily_keywords.py --refresh`
 - 작년 시즌 검색수 = 현재 월 검색수 × 데이터랩 추이 비율 (추정값)
 - 기회 지수 = 작년 시즌 검색수 ÷ (블로그 + 카페 글 수)
