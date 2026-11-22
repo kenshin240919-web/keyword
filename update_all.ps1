@@ -7,6 +7,7 @@ param([switch]$Startup, [switch]$Rerun)
 
 $ErrorActionPreference = 'Continue'
 $env:GIT_TERMINAL_PROMPT = '0'  # never wait for a password in a hidden window
+$env:GCM_INTERACTIVE = 'never'  # nor for a Git Credential Manager sign-in window hidden behind others
 $base = Split-Path -Parent $PSScriptRoot
 $logDir = Join-Path $PSScriptRoot 'logs'
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
