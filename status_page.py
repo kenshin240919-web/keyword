@@ -348,7 +348,7 @@ def _link_state(job, qr_tasks, qr_blog, qr_check=None):
 
 def _video_state(flow, done, job, plan=None):
     via = f" ({flow['engine']})" if flow.get("engine") else ""
-    if done.get("done"):
+    if done.get("done") or flow.get("video_done"):
         return {"icon": "ok", "text": f"완성{via}"}
     status = flow.get("status")
     if status == "running":
