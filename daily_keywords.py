@@ -70,7 +70,12 @@ DEFAULT_CONFIG = {
     "thumbnail_out": str(BASE_DIR / "thumbnails"),
     # 구글 트렌드 '지금 뜨는 검색어' (google_trends.py): 글감 분야 트렌드를 씨앗에 더하고(seed_limit개까지)
     # 리포트에 '구글 트렌드 지금 뜨는 검색어' 칸(show개)을 붙입니다. categories가 비면 google_trends.GOOD_CATEGORIES.
-    "google_trends": {"enabled": True, "geo": "KR", "hours": 48, "seed_limit": 30, "show": 20, "categories": []},
+    # The blog writes about 정부지원·금융·생활정보: only these trend fields, and no coin, stock-price or other
+    # live-price trends (XRP시세, 수이코인, 코스피시총순위, 한라봉, 광안리놀거리 came in 2026-11-22~24).
+    "google_trends": {"enabled": True, "geo": "KR", "hours": 48, "seed_limit": 30, "show": 20,
+                      "categories": ["법·정부", "비즈니스·금융", "직업·교육", "건강"],
+                      "banned": ["코인", "비트코인", "이더리움", "리플", "XRP", "솔라나", "도지", "도미넌스", "파이낸스",
+                                 "업비트", "빗썸", "시세", "주가", "코스피", "코스닥", "나스닥", "시총", "종목", "상장"]},
 }
 TELEGRAM_KEYS = ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID")
 
@@ -84,7 +89,10 @@ PROFILES = {
              "config": {"top_n": 15, "open_report": False, "banned_words": [
                  "실시간", "시세", "오늘", "내일", "주간날씨", "환율", "주가", "당첨번호", "비트코인",
                  "인버스", "레버리지", "선물지수", "KODEX", "TIGER", "ACE", "RISE", "SOL", "KBSTAR", "HANARO",
-                 "ARIRANG", "VOO", "QQQ", "SCHD", "SPY", "SOXL", "JEPI"]},
+                 "ARIRANG", "VOO", "QQQ", "SCHD", "SPY", "SOXL", "JEPI"],
+                 # life keeps every writable trend field (google_trends.GOOD_CATEGORIES)
+                 "google_trends": {"enabled": True, "geo": "KR", "hours": 48, "seed_limit": 30, "show": 20,
+                                   "categories": [], "banned": []}},
              "rss": ["https://weezzle.co.kr/rss"]},
 }
 PROFILE = "blog"
@@ -181,7 +189,7 @@ def google_trend_rows(config):
     if TRENDS is None and gt.get("enabled"):
         try:
             rows, source = google_trends.fetch_trends(gt.get("geo", "KR"), gt.get("hours", 48))
-            TRENDS = google_trends.good(rows, gt.get("categories"), config["banned_words"])
+            TRENDS = google_trends.good(rows, gt.get("categories"), config["banned_words"] + gt.get("banned", []))
             log(f"  구글 트렌드 {len(rows)}개 중 글감 분야 {len(TRENDS)}개 ({source})")
         except Exception as e:  # network or page change
             log(f"  [건너뜀] 구글 트렌드: {e}")
