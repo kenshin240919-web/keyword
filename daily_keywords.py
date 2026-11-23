@@ -53,6 +53,9 @@ DEFAULT_CONFIG = {
     "season_months_ahead": 1,    # 1년 전 기준 몇 달 뒤부터 볼지
     "top_n": 10,
     "exclude_recent_days": 3,
+    # A keyword recommended but not sent came back every 4 days (2026-11-15 ≈ 11-19, 11-16 ≈ 11-20, 11-17 ≈ 11-21):
+    # recommended keywords now stay out this many days. (exclude_recent_days above is no longer used.)
+    "skip_recommended_days": 14,
     "weights": {"volume": 0.3, "opportunity": 0.5, "growth": 0.2},
     "banned_words": [],
     "open_report": True,
@@ -513,6 +516,25 @@ def _similar(a, b):
     return _common_len(a, b) >= 4
 
 
+def _same_topic(a, b):
+    """Nearly the same post: one inside the other (재직증명서 / 재직증명서양식) or 5+ letters in common
+    (연금저축계좌 / 소득공제용연금저축 is 4, so both may still come)."""
+    a, b = normalize(a).upper(), normalize(b).upper()
+    return a in b or b in a or _common_len(a, b) >= 5
+
+
+def distinct_top(rows, n):
+    """The best n rows, leaving out a keyword that is the same topic as a better one already taken
+    (근로소득원천징수 and 근로소득원천징수영수증 took two of the ten places, 2026-11-15)."""
+    top = []
+    for r in rows:
+        if not any(_same_topic(r["keyword"], t["keyword"]) for t in top):
+            top.append(r)
+        if len(top) == n:
+            break
+    return top
+
+
 # 꼭 쓸 3개를 고르는 기준: (이름, 고르는 값, 선정 이유)
 MUST_RULES = (
     ("경쟁 최저", lambda r: r["opportunity"], "검색 대비 경쟁 글이 가장 적어 상위 노출에 유리"),
@@ -896,12 +918,17 @@ def run(today=None, refresh=False, seeds=None, period=None, open_browser=True):
     found = collect_candidates(seeds, keys)
     banned = [b for b in config["banned_words"] if b]
     # 직접 뽑기는 다른 블로그용이라 매일 리포트의 추천·작성 기록과 상관없이 모두 보여 줍니다.
-    skip = set() if custom else excluded_keywords(db, today, config["exclude_recent_days"])
+    skip = set() if custom else excluded_keywords(db, today, config["skip_recommended_days"])
     if PROFILE in PROFILES and not custom:
         skip |= blog_done()
+    # Keywords already sent or written also keep out their near twins (운전면허필기시험접수 → 운전면허필기시험).
+    done = [] if custom else [normalize(k).upper() for k in sent_keywords(db) + written_keywords(db)]
+    if PROFILE in PROFILES and not custom:
+        done += sorted(blog_done())
     scan = sorted(
         ((kw, vol) for kw, (vol, _) in found.items()
-         if vol >= config["min_now_volume"] and normalize(kw).upper() not in skip and not any(b in kw for b in banned)),
+         if vol >= config["min_now_volume"] and normalize(kw).upper() not in skip and not any(b in kw for b in banned)
+         and not any(_same_topic(kw, d) for d in done)),
         key=lambda x: x[1], reverse=True)[:config["scan_limit"]]
     log(f"  연관 키워드 {len(found)}개 → 추정 대상 {len(scan)}개")
 
@@ -926,7 +953,7 @@ def run(today=None, refresh=False, seeds=None, period=None, open_browser=True):
     ]
     if not rows:
         sys.exit("[오류] 블로그 문서 수를 하나도 가져오지 못했습니다. NAVER_CLIENT_ID/SECRET을 확인해 주세요.")
-    top = score_rows(rows, config["weights"])[:config["top_n"]]
+    top = distinct_top(score_rows(rows, config["weights"]), config["top_n"])
 
     log("4/5 세부 키워드 수집")
     add_details(top, found, seeds, keys)
