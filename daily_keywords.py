@@ -333,7 +333,8 @@ def fetch_each(func, label, keywords, keys):
 
 # 키워드 끝에 붙는 말: 이걸 떼어 낸 앞부분(예: 에너지바우처)을 세부 키워드의 기준으로 씁니다.
 DETAIL_SUFFIXES = ("신청방법", "신청기간", "신청자격", "신청대상", "자격조건", "잔액조회", "지급일", "사용처",
-                   "계산기", "사이트", "신청", "대상", "조건", "자격", "조회", "방법", "기간", "금액")
+                   "계산기", "사이트", "신청", "대상", "조건", "자격", "조회", "방법", "기간", "금액",
+                   "추천", "후기", "가격", "비교", "순위")
 
 
 def detail_base(keyword, seeds):
@@ -348,8 +349,15 @@ def detail_base(keyword, seeds):
 
 
 # 연관 키워드에서 세부 키워드를 못 찾으면, 기준 단어 뒤에 이 말을 붙여 검색수를 직접 물어봅니다.
+# 정부지원용 끝말과 상품·금융용 끝말을 함께 묻고, 실제로 검색되는 것만 남깁니다
+# ('쿡셀후라이팬 신청방법'처럼 아무도 찾지 않는 조합이 세부 키워드로 나오던 문제, 2026-11-27).
 DETAIL_TRY = ("신청방법", "지급일", "금액", "대상", "조건", "자격", "신청", "조회", "한도",
-              "계산기", "기간", "사용처", "잔액조회", "서류", "소득기준")
+              "계산기", "기간", "사용처", "잔액조회", "서류", "소득기준",
+              "후기", "가격", "추천", "비교", "단점", "사이즈", "최저가", "세트", "순위", "금리")
+
+# 세부 키워드로 쓸 최소 한 달 검색수. 네이버가 PC·모바일 모두 '<10'으로 주면 5+5=10이 되는데,
+# 이것은 사실상 검색이 없는 말이라 고르지 않습니다.
+MIN_DETAIL_VOLUME = 30
 
 
 def _lookup_volumes(hints, keys, volumes):
@@ -369,7 +377,8 @@ def _lookup_volumes(hints, keys, volumes):
 
 def _pick_details(keyword, base, volumes, n):
     kw_u, base_u = keyword.upper(), base.upper()
-    picks = sorted((kw for kw, vol in volumes.items() if vol > 0 and base_u in kw and kw not in (kw_u, base_u)),
+    picks = sorted((kw for kw, vol in volumes.items()
+                    if vol >= MIN_DETAIL_VOLUME and base_u in kw and kw not in (kw_u, base_u)),
                    key=lambda kw: volumes[kw], reverse=True)[:n]
     return [(f"{base} {kw[len(base_u):]}" if kw.startswith(base_u) else kw, volumes[kw]) for kw in picks]
 
@@ -378,7 +387,8 @@ def add_details(top, found, seeds, keys, n=3):
     """추천 키워드마다 실제로 검색되는 세부 키워드 n개를 [(보여줄 이름, 현재 월 검색수), ...]로 붙입니다.
 
     1) 연관 키워드 목록에서 기준 단어(예: 에너지바우처)가 들어간 것을 검색수 순으로 고르고,
-    2) 모자라면 '기준 단어 + 신청방법/지급일/금액…' 조합을 만들어 검색수를 직접 확인합니다.
+    2) 모자라면 '기준 단어 + 신청방법/금액/후기/가격…' 조합을 만들어 검색수를 직접 확인합니다.
+    검색수가 MIN_DETAIL_VOLUME 미만인 것은 빼므로, 3개가 안 되면 있는 만큼만 붙습니다(억지로 채우지 않음).
     """
     volumes = {kw.upper(): vol for kw, (vol, _) in found.items()}
     _lookup_volumes([r["keyword"] for r in top], keys, volumes)
@@ -904,7 +914,9 @@ def run(today=None, refresh=False, seeds=None, period=None, open_browser=True):
         # 같은 날 다시 실행하면 아침 첫 결과를 그대로 보여 줍니다 (API를 다시 부르지 않음).
         saved = json.loads(result_path.read_text(encoding="utf-8"))
         log("오늘 첫 결과를 그대로 보여 줍니다. 새로 뽑으려면 --refresh 를 붙여 실행하세요.")
-        missing = [r for r in saved["top"] if len(r.get("details", [])) < 3]
+        # 예전 기준으로 붙은 검색 없는 세부 키워드(검색수 10)도 다시 찾습니다.
+        missing = [r for r in saved["top"]
+                   if len([d for d in r.get("details", []) if d[1] >= MIN_DETAIL_VOLUME]) < 3]
         if missing:
             log(f"  세부 키워드가 모자란 {len(missing)}개만 다시 찾습니다.")
             keys = keywordstool.load_keys(required=keywordstool.REQUIRED_KEYS)
