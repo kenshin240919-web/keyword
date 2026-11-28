@@ -46,7 +46,7 @@ REPORT_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}\.(html|csv)$")
 CUSTOM_NAME = re.compile(r"^직접뽑기/\d{4}-\d{2}-\d{2}_\d{4}_[0-9A-Za-z가-힣]+\.(html|csv)$")  # daily_keywords.py --seeds
 BASE_URL = f"http://{HOST}:{PORT}"
 # 서버 코드를 바꾸면 올립니다. 예전 버전 서버가 떠 있으면 끄고 새로 켭니다.
-SERVER_VERSION = 40
+SERVER_VERSION = 41
 LOG_PATH = dk.BASE_DIR / "logs" / "report_server.log"
 
 
@@ -217,7 +217,8 @@ class Handler(BaseHTTPRequestHandler):
         if (not isinstance(keywords, list) or not 1 <= len(keywords) <= 4
                 or not all(isinstance(k, str) and 0 < len(k.strip()) <= 100 for k in keywords)):
             return None
-        return [k.strip() for k in keywords]
+        # A report made before 2026-11-28 sends only main + details (2 blogs when there was one detail): fill to 4.
+        return dk.pad_keywords([k.strip() for k in keywords])
 
     def _plan(self, keywords, with_copy=False):
         """보내기 전에 확인할 것: 사이트 자동 포스팅 이미지, 썸네일을 만들 수 있는지와 그 문구."""

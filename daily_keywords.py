@@ -619,8 +619,14 @@ def _details_html(r):
 
 
 def post_keywords(r):
-    """Blog Automator로 보낼 키워드: 1번 블로그는 메인 키워드, 2~4번은 세부 키워드."""
-    return [r["keyword"]] + [name for name, _ in r.get("details", [])][:3]
+    """Blog Automator로 보낼 키워드: 1번 블로그는 메인 키워드, 2~4번은 세부 키워드. 세부 키워드가 모자라면
+    남은 블로그도 메인 키워드로 씁니다 (블로그마다 글 형식이 달라 내용은 겹치지 않음; 2026-11-28, 세부 키워드가
+    1개뿐이라 3·4번 블로그에 글이 안 간 뒤 사용자가 고름)."""
+    return pad_keywords([r["keyword"]] + [name for name, _ in r.get("details", [])][:3])
+
+
+def pad_keywords(keywords, blogs=4):
+    return list(keywords) + [keywords[0]] * (blogs - len(keywords)) if keywords else []
 
 
 def _post_button(r):
