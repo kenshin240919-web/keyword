@@ -10,7 +10,7 @@
     python daily_keywords.py --profile life  # life.guidejung.com용: seeds_life.txt + 경쟁 사이트 RSS 씨앗,
                                              # 기록 history_life.db, 결과 reports/life/날짜.json·.html (위 옵션 모두 함께 사용)
 
-흐름: seeds.txt (+ 구글 트렌드 글감 분야, google_trends.py) → 연관 키워드(검색광고) → 작년 시즌 검색수 추정(데이터랩) → 1차 필터
+흐름: seeds.txt (구글 트렌드는 리포트에 보여 주기만, google_trends.py) → 연관 키워드(검색광고) → 작년 시즌 검색수 추정(데이터랩) → 1차 필터
       → 블로그 문서 수(검색 API) → 점수 → reports/날짜.html, .csv + history.db 기록
 
 작년 시즌: 오늘이 2026-10-20이면 2025-11-20 ~ 2025-12-20 (1년 전 기준 한 달 뒤 한 달).
@@ -53,6 +53,10 @@ DEFAULT_CONFIG = {
     "season_months_ahead": 1,    # 1년 전 기준 몇 달 뒤부터 볼지
     "top_n": 10,
     "exclude_recent_days": 3,
+    # Never recommended, whatever seed they came from: the blog writes about 정부지원·금융·생활정보, not stocks,
+    # funds or coins (live prices go stale in a day). Part match, case-sensitive; config.json's banned_words adds more.
+    "topic_banned": ["주가", "주식", "ETF", "지수", "시세", "코인", "비트코인", "종목", "상장", "공모주",
+                     "코스피", "코스닥", "나스닥", "시총", "배당주", "테마주", "관련주", "KOTC"],
     # A keyword recommended but not sent came back every 4 days (2026-11-15 ≈ 11-19, 11-16 ≈ 11-20, 11-17 ≈ 11-21):
     # recommended keywords now stay out this many days. (exclude_recent_days above is no longer used.)
     "skip_recommended_days": 14,
@@ -72,7 +76,9 @@ DEFAULT_CONFIG = {
     # 리포트에 '구글 트렌드 지금 뜨는 검색어' 칸(show개)을 붙입니다. categories가 비면 google_trends.GOOD_CATEGORIES.
     # The blog writes about 정부지원·금융·생활정보: only these trend fields, and no coin, stock-price or other
     # live-price trends (XRP시세, 수이코인, 코스피시총순위, 한라봉, 광안리놀거리 came in 2026-11-22~24).
-    "google_trends": {"enabled": True, "geo": "KR", "hours": 48, "seed_limit": 30, "show": 20,
+    # seed: False — trends are only shown in the report, not used as seeds. As seeds they brought company names
+    # (서남, 안랩, 캠시스) whose related keywords were stock prices: 9 of 10 on 2026-11-28 were 주가·ETF·지수.
+    "google_trends": {"enabled": True, "seed": False, "geo": "KR", "hours": 48, "seed_limit": 30, "show": 20,
                       "categories": ["법·정부", "비즈니스·금융", "직업·교육", "건강"],
                       "banned": ["코인", "비트코인", "이더리움", "리플", "XRP", "솔라나", "도지", "도미넌스", "파이낸스",
                                  "업비트", "빗썸", "시세", "주가", "코스피", "코스닥", "나스닥", "시총", "종목", "상장"]},
@@ -91,8 +97,9 @@ PROFILES = {
                  "인버스", "레버리지", "선물지수", "KODEX", "TIGER", "ACE", "RISE", "SOL", "KBSTAR", "HANARO",
                  "ARIRANG", "VOO", "QQQ", "SCHD", "SPY", "SOXL", "JEPI"],
                  # life keeps every writable trend field (google_trends.GOOD_CATEGORIES)
-                 "google_trends": {"enabled": True, "geo": "KR", "hours": 48, "seed_limit": 30, "show": 20,
-                                   "categories": [], "banned": []}},
+                 "google_trends": {"enabled": True, "seed": True, "geo": "KR", "hours": 48, "seed_limit": 30,
+                                   "show": 20, "categories": [], "banned": []},
+                 "topic_banned": []},
              "rss": ["https://weezzle.co.kr/rss"]},
 }
 PROFILE = "blog"
@@ -207,7 +214,7 @@ def load_seeds(today=None):
         seeds += extra
     config = load_config()
     trend = google_trend_rows(config)
-    if trend:
+    if trend and config["google_trends"].get("seed", True):
         extra = [s for s in google_trends.trend_seeds(trend, config["google_trends"].get("seed_limit", 30))
                  if s not in seeds]
         log(f"  구글 트렌드 씨앗 {len(extra)}개 추가")
@@ -936,7 +943,7 @@ def run(today=None, refresh=False, seeds=None, period=None, open_browser=True):
         sys.exit("[오류] 10분 동안 인터넷에 연결되지 않아 오늘 키워드를 뽑지 못했습니다. 연결된 뒤 홈의 [지금 뽑기]를 눌러 주세요.")
     log(f"1/5 연관 키워드 수집 (씨앗 {len(seeds)}개)")
     found = collect_candidates(seeds, keys)
-    banned = [b for b in config["banned_words"] if b]
+    banned = [b for b in config["banned_words"] + config.get("topic_banned", []) if b]
     # 직접 뽑기는 다른 블로그용이라 매일 리포트의 추천·작성 기록과 상관없이 모두 보여 줍니다.
     skip = set() if custom else excluded_keywords(db, today, config["skip_recommended_days"])
     if PROFILE in PROFILES and not custom:
